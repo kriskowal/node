@@ -321,6 +321,24 @@ def build(bld):
     native_cc_debug.rule = javascript_in_c
   native_cc.rule = javascript_in_c
 
+  ### src/node_narwhal_bootstrap.cc
+
+  narwhal_bootstrap_cc = bld.new_task_gen(
+    source='narwhal/bootstrap.js',
+    target="src/node_narwhal_bootstrap.h",
+    before="cxx"
+  )
+  narwhal_bootstrap_cc.install_path = None
+
+  # Add the rule /after/ cloning the debug
+  # This is a work around for an error had in python 2.4.3 (I'll paste the
+  # error that was had into the git commit meessage. git-blame to find out
+  # where.)
+  if bld.env["USE_DEBUG"]:
+    narwhal_bootstrap_cc_debug = narwhal_bootstrap_cc.clone("debug")
+    narwhal_bootstrap_cc_debug.rule = javascript_in_c
+  narwhal_bootstrap_cc.rule = javascript_in_c
+
   ### node lib
   node = bld.new_task_gen("cxx", "program")
   node.name         = "node"
@@ -356,6 +374,41 @@ def build(bld):
   node.install_path = '${PREFIX}/lib'
   node.install_path = '${PREFIX}/bin'
   node.chmod = 0755
+
+  # node_narwhal
+  node_narwhal = bld.new_task_gen("cxx", "program")
+  node_narwhal.name         = "node_narwhal"
+  node_narwhal.target       = "node_narwhal"
+  node_narwhal.source = """
+    src/node_narwhal.cc
+    src/node_child_process.cc
+    src/node_constants.cc
+    src/node_dns.cc
+    src/node_events.cc
+    src/node_file.cc
+    src/node_http.cc
+    src/node_net.cc
+    src/node_signal_handler.cc
+    src/node_stat.cc
+    src/node_stdio.cc
+    src/node_timer.cc
+  """
+  node_narwhal.includes = """
+    src/ 
+    deps/v8/include
+    deps/libev
+    deps/udns
+    deps/libeio
+    deps/evcom 
+    deps/http_parser
+    deps/coupling
+  """
+  node_narwhal.add_objects = 'ev eio evcom http_parser coupling'
+  node_narwhal.uselib_local = ''
+  node_narwhal.uselib = 'GNUTLS GPGERROR UDNS V8 EXECINFO DL KVM'
+
+  node_narwhal.install_path = '${PREFIX}/bin'
+  node_narwhal.chmod = 0755
 
   def subflags(program):
     if os.path.exists(join(cwd, ".git")):
