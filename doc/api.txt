@@ -1,12 +1,12 @@
 NODE(1)
 =======
 Ryan Dahl <ry@tinyclouds.org>
-Version, 0.1.25, 2010.01.09
+Version, 0.1.28, 2010.02.09
 
 
 == NAME
 
-node - evented I/O for V8 javascript
+node - evented I/O for V8 JavaScript
 
 
 
@@ -39,7 +39,7 @@ Server running at http://127.0.0.1:8000/
 
 Node supports 3 string encodings. UTF-8 (+"utf8"+), ASCII (+"ascii"+), and
 Binary (+"binary"+). +"ascii"+ and +"binary"+ only look at the first 8 bits
-of the 16bit javascript string characters. Both are relatively fast--use
+of the 16bit JavaScript string characters. Both are relatively fast--use
 them if you can. +"utf8"+ is slower and should be avoided when possible.
 
 Unless otherwise noted, functions are all asynchronous and do not block
@@ -48,7 +48,7 @@ execution.
 
 === Global Objects
 
-+GLOBAL+ ::
++global+ ::
 The global namespace object.
 
 +process+ ::
@@ -63,6 +63,9 @@ The search path for absolute path arguments to +require()+.
 
 +__filename+ ::
 The filename of the script being executed.
+
++__dirname+ ::
+The dirname of the script being executed.
 
 +module+ ::
 A reference to the current module (of type +process.Module+). In particular
@@ -79,7 +82,7 @@ more information.
 | +"exit"+ | +code+     | Made when the process exits.
                           A listener on this event should not try to perform
                           I/O since the process will forcibly exit in less
-                          than microsecond. However, it is a good hook to
+                          than a microsecond. However, it is a good hook to
                           perform constant time checks of the module's
                           state (like for unit tests).
                           +
@@ -97,10 +100,10 @@ more information.
                                                signal names such as SIGINT, SIGUSR1, etc.
 |=========================================================
 
-+process.ARGV+ ::
++process.argv+ ::
 An array containing the command line arguments.
 
-+process.ENV+ ::
++process.env+ ::
 An object containing the user environment. See environ(7).
 
 +process.pid+ ::
@@ -108,6 +111,9 @@ The PID of the process.
 
 +process.platform+ ::
 What platform you're running on. +"linux2"+, +"darwin"+, etc.
+
++process.startTime+ ::
+When the process started.
 
 +process.memoryUsage()+ ::
 Returns the memory usage of the Node process. It looks like this
@@ -123,12 +129,18 @@ Returns the memory usage of the Node process. It looks like this
 +
 +heapTotal+ and +heapUsed+ refer to V8's memory usage.
 
++process.nextTick(callback)+::
+On the next loop around the event loop call this callback.
+
 +process.exit(code=0)+::
 Ends the process with the specified code. By default it exits with the
 success code 0.
 
 +process.cwd()+::
 Returns the current working directory of the process.
+
++process.getuid(), process.setuid(id)+::
+Gets/sets the user identity of the process. (See setuid(2).)
 
 +process.chdir(directory)+::
 Changes the current working directory of the process.
@@ -162,7 +174,7 @@ process.watchFile(f, function (curr, prev) {
 });
 -------------------------
 +
-These stat objects are instances of +posix.Stat+. 
+These stat objects are instances of +fs.Stat+. 
 
 +process.unwatchFile(filename)+::
 Stop watching for changes on +filename+.
@@ -199,8 +211,8 @@ Like +puts()+ but without the trailing new-line.
 A synchronous output function. Will block the process and
 output the string immediately to stdout.
 
-+inspect(object)+ ::
-Return a string representation of the +object+. (For debugging.)
++inspect(object, showHidden)+ ::
+Return a string representation of the +object+. (For debugging.)  If showHidden is true, then the object's non-enumerable properties will be shown too.
 
 +exec(command)+::
 Executes the command as a child process, buffers the output and returns it
@@ -209,7 +221,7 @@ in a promise callback.
 ----------------------------------------
 var sys = require("sys");
 sys.exec("ls /").addCallback(function (stdout, stderr) {
-  puts(stdout);
+  sys.puts(stdout);
 });
 ----------------------------------------
 +
@@ -222,10 +234,10 @@ sys.exec("ls /").addCallback(function (stdout, stderr) {
 
 Many objects in Node emit events: a TCP server emits an event each time
 there is a connection, a child process emits an event when it exits. All
-objects which emit events are instances of +process.EventEmitter+.
+objects which emit events are instances of +events.EventEmitter+.
 
 Events are represented by a camel-cased string. Here are some examples:
-+"connection"+, +"receive"+, +"messageBegin"+.
++"connection"+, +"data"+, +"messageBegin"+.
 
 Functions can be then be attached to objects, to be executed when an event
 is emitted. These functions are called _listeners_.
@@ -234,7 +246,9 @@ Some asynchronous file operations return an +EventEmitter+ called a
 _promise_.  A promise emits just a single event when the operation is
 complete.
 
-==== +process.EventEmitter+
+==== +events.EventEmitter+
+
++require("events")+ to access the events module.
 
 All EventEmitters emit the event +"newListener"+ when new listeners are
 added.
@@ -253,7 +267,7 @@ Adds a listener to the end of the listeners array for the specified event.
 +
 ----------------------------------------
 server.addListener("connection", function (socket) {
-  puts("someone connected!");
+  sys.puts("someone connected!");
 });
 ----------------------------------------
 
@@ -268,9 +282,11 @@ manipulated, e.g. to remove listeners.
 +emitter.emit(event, arg1, arg2, ...)+ ::
 Execute each of the listeners in order with the supplied arguments.
 
-==== +process.Promise+
+==== +events.Promise+
 
-+process.Promise+ inherits from +process.eventEmitter+. A promise emits one of two
++require("events")+ to access the events module.
+
++events.Promise+ inherits from +process.EventEmitter+. A promise emits one of two
 events: +"success"+ or +"error"+.  After emitting its event, it will not
 emit anymore events.
 
@@ -279,45 +295,72 @@ emit anymore events.
 | Event       | Parameters       | Notes
 | +"success"+ | (depends)        |
 | +"error"+   | (depends)        |
-| +"cancel"+  | (depends)        |
 |=========================================================
 
 +promise.addCallback(listener)+ ::
 Adds a listener for the +"success"+ event. Returns the same promise object.
+The listener is executed right away if the promise has already fired.
 
 +promise.addErrback(listener)+ ::
 Adds a listener for the +"error"+ event. Returns the same promise object.
-
-+promise.addCancelback(listener)+ ::
-Adds a listener for the +"cancel"+ event. Returns the same promise object.
+The listener is executed right away if the promise has already fired.
 
 +promise.emitSuccess(arg1, arg2, ...)+ ::
-If you created the promise (by doing +new process.Promise()+) then call
+If you created the promise (by doing +new events.Promise()+) then call
 +emitSuccess+ to emit the +"success"+ event with the given arguments. 
 +
 (+promise.emit("success", arg1, arg2, ...)+ should also work, but doesn't at
 the moment due to a bug; use +emitSuccess+ instead.)
 
 +promise.emitError(arg1, arg2, ...)+ ::
-Emits the +"error"+ event.
+Emits the +"error"+ event. If no error handler is attached to the promise
+between +promise.emitError()+ and +process.nextTick()+, an exception is
+thrown.
++
+To explain the exception behavior, assume you have a "computeQuestion"
+function as follows:
++
+----------------------------------------
+var events = require('events');
+function computeQuestion(answer) {
+  var promise = new events.Promise();
+  if (answer !== 42) {
+    promise.emitError('wrong answer');
+    return promise;
+  }
+  // compute the question for 42
 
-+promise.emitCancel(arg1, arg2, ...)+ ::
-Emits the +"cancel"+ event. You may still get a +"success"+ or +"error"+
-callback if the promise giver does not handle the cancel event. Use
-+promise.cancel()+ to ignore any later events.
-
-+promise.cancel()+ ::
-Clears all +"success"+ and +"error"+ event listeners from the promise, then
-emits the +"cancel"+ event. Whether or not the promise is actually canceled
-or not depends on the promise giver. This also clears Promise.timeout() if one
-was set.
+  return promise;
+}
+----------------------------------------
++
+You can stop an exception to be thrown here by attaching an errback handler
+right away (in the same event loop tick) like this:
++
+----------------------------------------
+computeQuestion(23).addErrback(function() {
+  // No exception will be thrown
+});
+----------------------------------------
++
+However, if you try to  attach the error handler in a later tick, the promise
+will already have thrown an exception:
++
+----------------------------------------
+var promise = computeQuestion(23);
+setTimeout(function() {
+  promise.addErrback(function() {
+    // This will never execute, the promise already threw an exception
+  });
+}, 1000);
+----------------------------------------
 
 +promise.timeout(timeout = undefined)+ ::
 If the +timeout+ parameter is provided, the promise will emit an +"error"+
-event after the given amount of millseconds. The timeout is canceled by any
-+"success"+, +"error"+ or +"cancel"+ event being emitted by the Promise.
+event after the given amount of milliseconds. The timeout is canceled by any
++"success"+ or +"error"+ event being emitted by the promise.
 +
-To tell apart a timeout from a regular "error" event, use the following test:
+To tell a timeout apart from a regular "error" event, use the following test:
 +
 ----------------------------------------
 promise.addErrback(function(e) {
@@ -388,7 +431,7 @@ Close stdin.
 
 === Modules
 
-Node uses the CommonJS module system
+Node uses the CommonJS module system.
 
 Node has a simple module loading system.  In Node, files and modules are in
 one-to-one correspondence.  As an example, +foo.js+ loads the module
@@ -461,14 +504,14 @@ Modules; see the section below about addons. +"index.js"+ allows one to
 package a module as a directory.
 
 +require.paths+ can be modified at runtime by simply unshifting new
-paths on to it and at startup with the +NODE_PATH+ environmental
+paths onto it, or at startup with the +NODE_PATH+ environmental
 variable (which should be a list of paths, colon separated).
 
 Use +process.mixin()+ to include modules into the global namespace.
 
 ----------------------------------------
 process.mixin(GLOBAL, require("./circle"), require("sys"));
-puts("The area of a cirlce of radius 4 is " + area(4));
+puts("The area of a circle of radius 4 is " + area(4));
 ----------------------------------------
 
 
@@ -477,18 +520,22 @@ puts("The area of a cirlce of radius 4 is " + area(4));
 === Timers
 
 
-+setTimeout(callback, delay)+::
-To schedule execution of callback after delay milliseconds. Returns a
++setTimeout(callback, delay, [arg, ...])+::
+To schedule execution of +callback+ after +delay+ milliseconds. Returns a
 +timeoutId+ for possible use with +clearTimeout()+.
+
+Optionally, you can also pass arguments to the callback.
 
 
 +clearTimeout(timeoutId)+::
 Prevents said timeout from triggering.
 
 
-+setInterval(callback, delay)+::
-To schedule the repeated execution of callback every +delay+ milliseconds. Returns
++setInterval(callback, delay, [arg, ...])+::
+To schedule the repeated execution of +callback+ every +delay+ milliseconds. Returns
 a +intervalId+ for possible use with +clearInterval()+.
+
+Optionally, you can also pass arguments to the callback.
 
 
 +clearInterval(intervalId)+::
@@ -509,7 +556,7 @@ Node provides a tridirectional +popen(3)+ facility through the class
 
 | +"output"+ | +data+     | Each time the child process 
                             sends data to its +stdout+, this event is
-                            emitted. +data+ is a string.  + If the child
+                            emitted. +data+ is a string. If the child
                             process closes its +stdout+ stream (a common
                             thing to do on exit), this event will be emitted
                             with +data === null+.
@@ -524,14 +571,14 @@ Node provides a tridirectional +popen(3)+ facility through the class
                             +"error"+ callbacks will no longer be made.
 |=========================================================
 
-+process.createChildProcess(command, args=[], env=ENV)+::
++process.createChildProcess(command, args=[], env=process.env)+::
 Launches a new process with the given +command+, command line arguments, and
 environmental variables. For example:
 +
 ----------------------------------------
 var ls = process.createChildProcess("ls", ["-lh", "/usr"]);
 ls.addListener("output", function (data) {
-  puts(data);
+  sys.puts(data);
 });
 ----------------------------------------
 +
@@ -562,16 +609,16 @@ will be sent +"SIGTERM"+. See signal(7) for a list of available signals.
 === POSIX module
 
 File I/O is provided by simple wrappers around standard POSIX functions.  To
-use this module do +require("posix")+. 
+use this module do +require("fs")+. 
 
 All POSIX wrappers have a similar form.  They return a promise
-(+process.Promise+). Example of deleting a file:
+(+events.Promise+). Example of deleting a file:
 
 ------------------------------------------------------------------------------
-var posix = require("posix"),
-      sys = require("sys");
+var fs = require("fs"),
+    sys = require("sys");
 
-var promise = posix.unlink("/tmp/hello");
+var promise = fs.unlink("/tmp/hello");
 
 promise.addCallback(function () {
   sys.puts("successfully deleted /tmp/hello");
@@ -582,8 +629,8 @@ There is no guaranteed ordering to the POSIX wrappers. The
 following is very much prone to error
 
 ------------------------------------------------------------------------------
-posix.rename("/tmp/hello", "/tmp/world");
-posix.stat("/tmp/world").addCallback(function (stats) {
+fs.rename("/tmp/hello", "/tmp/world");
+fs.stat("/tmp/world").addCallback(function (stats) {
   sys.puts("stats: " + JSON.stringify(stats));
 });
 ------------------------------------------------------------------------------
@@ -592,8 +639,8 @@ It could be that +stat()+ is executed before the +rename()+.
 The correct way to do this is to chain the promises.
 
 ------------------------------------------------------------------------------
-posix.rename("/tmp/hello", "/tmp/world").addCallback(function () {
-  posix.stat("/tmp/world").addCallback(function (stats) {
+fs.rename("/tmp/hello", "/tmp/world").addCallback(function () {
+  fs.stat("/tmp/world").addCallback(function (stats) {
     sys.puts("stats: " + JSON.stringify(stats));
   });
 });
@@ -602,64 +649,76 @@ posix.rename("/tmp/hello", "/tmp/world").addCallback(function () {
 Or use the +promise.wait()+ functionality:
 
 ------------------------------------------------------------------------------
-posix.rename("/tmp/hello", "/tmp/world").wait();
-var stats = posix.stat("/tmp/world").wait();
+fs.rename("/tmp/hello", "/tmp/world").wait();
+var stats = fs.stat("/tmp/world").wait();
 sys.puts("stats: " + JSON.stringify(stats));
 ------------------------------------------------------------------------------
 
-+posix.rename(path1, path2)+ ::
++fs.rename(path1, path2)+ ::
   See rename(2).
   - on success: no parameters.
   - on error: no parameters.
 
-
-
-+posix.stat(path)+ ::
-  See stat(2).
-  - on success: Returns +posix.Stats+ object. It looks like this:
-    +{ dev: 2049, ino: 305352, mode: 16877, nlink: 12, uid: 1000, gid: 1000,
-    rdev: 0, size: 4096, blksize: 4096, blocks: 8, atime:
-    "2009-06-29T11:11:55Z", mtime: "2009-06-29T11:11:40Z", ctime:
-    "2009-06-29T11:11:40Z" }+
-    See the +posix.Stats+ section below for more information.
++fs.truncate(fd, len)+ ::
+  See ftruncate(2).
+  - on success: no parameters.
   - on error: no parameters.
 
-+posix.unlink(path)+ ::
+
++fs.stat(path)+ ::
+See stat(2).
+- on success: Returns +fs.Stats+ object. It looks like this:
++
+------------------------------------------------------------------------------
+  { dev: 2049, ino: 305352, mode: 16877, nlink: 12, uid: 1000, gid: 1000,
+  rdev: 0, size: 4096, blksize: 4096, blocks: 8, atime:
+  "2009-06-29T11:11:55Z", mtime: "2009-06-29T11:11:40Z", ctime:
+  "2009-06-29T11:11:40Z" }+
+------------------------------------------------------------------------------
++
+See the +fs.Stats+ section below for more information.
+
+- on error: no parameters.
+
+
++fs.unlink(path)+ ::
   See unlink(2)
   - on success: no parameters.
   - on error: no parameters.
 
 
-+posix.rmdir(path)+ ::
++fs.rmdir(path)+ ::
   See rmdir(2)
   - on success: no parameters.
   - on error: no parameters.
 
-+posix.mkdir(path, mode)+ ::
+
++fs.mkdir(path, mode)+ ::
   See mkdir(2)
   - on success: no parameters.
   - on error: no parameters.
 
-+posix.readdir(path)+ ::
+
++fs.readdir(path)+ ::
   Reads the contents of a directory.
   - on success: One argument, an array containing the names (strings) of the
     files in the directory (excluding "." and "..").
   - on error: no parameters.
 
 
-+posix.close(fd)+ ::
++fs.close(fd)+ ::
   See close(2)
   - on success: no parameters.
   - on error: no parameters.
 
 
-+posix.open(path, flags, mode)+::
++fs.open(path, flags, mode)+::
   See open(2). The constants like +O_CREAT+ are defined at +process.O_CREAT+.
   - on success: +fd+ is given as the parameter.
   - on error: no parameters.
 
 
-+posix.write(fd, data, position, encoding)+::
++fs.write(fd, data, position, encoding)+::
   Write data to the file specified by +fd+.  +position+ refers to the offset
   from the beginning of the file where this data should be written. If
   +position+ is +null+, the data will be written at the current position.
@@ -667,35 +726,33 @@ sys.puts("stats: " + JSON.stringify(stats));
   - on success: returns an integer +written+ which specifies how many _bytes_ were written.
   - on error: no parameters.
 
-+posix.read(fd, length, position, encoding)+::
++fs.read(fd, length, position, encoding)+::
+  Read data from the file specified by +fd+.
+  +
+  +length+ is an integer specifying the number of
+  bytes to read.
+  +
+  +position+ is an integer specifying where to begin
+  reading from in the file.
+  +
+  - on success: returns +data, bytes_read+, what was read from the file.
+  - on error: no parameters.
 
-Read data from the file specified by +fd+.
-+
-+length+ is an integer specifying the number of
-bytes to read.
-+
-+position+ is an integer specifying where to begin
-reading from in the file.
-+
-- on success: returns +data, bytes_read+, what was read from the file.
-- on error: no parameters.
-
-+posix.cat(filename, encoding="utf8")+::
-
++fs.cat(filename, encoding="utf8")+::
 Outputs the entire contents of a file. Example:
 +
 --------------------------------
-posix.cat("/etc/passwd").addCallback(function (content) {
-  puts(content);
+fs.cat("/etc/passwd").addCallback(function (content) {
+  sys.puts(content);
 });
 --------------------------------
 +
 - on success: returns +data+, what was read from the file.
 - on error: no parameters.
 
-==== +posix.Stats+
+==== +fs.Stats+
 
-Objects returned from +posix.stat()+ are of this type.
+Objects returned from +fs.stat()+ are of this type.
 
 +stats.isFile()+::
 
@@ -721,20 +778,22 @@ In particular, large, possibly chunk-encoded, messages. The interface is
 careful to never buffer entire requests or responses--the
 user is able to stream data.
 
-HTTP message headers are represented by an object like this
+HTTP message headers are represented by an object like this:
 
 ----------------------------------------
-{ "Content-Length": "123"
-, "Content-Type": "text/plain"
-, "Connection": "keep-alive"
-, "Accept": "*/*"
+{ "content-length": "123"
+, "content-type": "text/plain"
+, "connection": "keep-alive"
+, "accept": "*/*"
 }
 ----------------------------------------
 
-In order to support the full spectrum of possible HTTP applications, Node"s
+Keys are lowercased. Values are not modified.
+
+In order to support the full spectrum of possible HTTP applications, Node's
 HTTP API is very low-level. It deals with connection handling and message
 parsing only. It parses a message into headers and body but it does not
-parse the actual headers or the body. 
+parse the actual headers or the body.
 
 
 ==== +http.Server+
@@ -761,12 +820,12 @@ parse the actual headers or the body.
 
 |=========================================================
 
-+http.createServer(request_listener, options);+ ::
++http.createServer(request_listener, [options]);+ ::
 Returns a new web server object.
 +
 The +options+ argument is optional. The
 +options+ argument accepts the same values as the
-options argument for +tcp.Server+ does.
+options argument for +tcp.Server+.
 +
 The +request_listener+ is a function which is automatically
 added to the +"request"+ event.
@@ -774,12 +833,12 @@ added to the +"request"+ event.
 +server.setSecure(format_type, ca_certs, crl_list, private_key, certificate)+ ::
 Enable TLS for all incoming connections, with the specified credentials.
 +
-format_type currently has to be "X509_PEM", and each of the ca, crl, key and
++format_type+ currently has to be "X509_PEM", and each of the ca, crl, key and
 cert parameters are in the format of PEM strings. 
 +
-The ca_certs is a string that holds a number of CA certificates for use in accepting
++ca_certs+ is a string that holds a number of CA certificates for use in accepting
 client connections that authenticate themselves with a client certificate. 
-The private_key is a PEM string of the unencrypted key for the server.
++private_key+ is a PEM string of the unencrypted key for the server.
 
 +server.listen(port, hostname)+ ::
 Begin accepting connections on the specified port and hostname.
@@ -804,7 +863,7 @@ the user--and passed as the first argument to a +"request"+ listener.
                                   message body is received. Example: A chunk
                                   of the body is given as the single
                                   argument. The transfer-encoding has been
-                                  decoded.  The body chunk is a String.  The
+                                  decoded.  The body chunk is a string.  The
                                   body encoding is set with
                                   +request.setBodyEncoding()+.
 
@@ -820,7 +879,7 @@ The request method as a string. Read only. Example:
 
 +request.url+ ::
 Request URL string. This contains only the URL that is
-present in the actual HTTP request. If the request is
+present in the actual HTTP request. If the request is:
 +
 ----------------------------------------
 GET /status?name=ryan HTTP/1.1\r\n
@@ -828,7 +887,7 @@ Accept: text/plain\r\n
 \r\n
 ----------------------------------------
 +
-Then +request.url+ will be
+Then +request.url+ will be:
 +
 ----------------------------------------
 "/status?name=ryan"
@@ -874,7 +933,7 @@ The HTTP protocol version as a string. Read only. Examples:
 +"1.1"+, +"1.0"+
 
 
-+request.setBodyEncoding(encoding)+ ::
++request.setBodyEncoding(encoding="binary")+ ::
 Set the encoding for the request body. Either +"utf8"+ or +"binary"+. Defaults
 to +"binary"+.
 
@@ -899,7 +958,7 @@ passed as the second parameter to the +"request"+ event.
 +response.sendHeader(statusCode, headers)+ ::
 
 Sends a response header to the request. The status code is a 3-digit HTTP
-status code, like +404+. The second argument, +headers+ are the response headers.
+status code, like +404+. The second argument, +headers+, are the response headers.
 +
 Example:
 +
@@ -998,11 +1057,11 @@ for the user to stream a body to the server with
 +client.setSecure(format_type, ca_certs, crl_list, private_key, certificate)+ ::
 Enable TLS for the client connection, with the specified credentials.
 +
-format_type currently has to be "X509_PEM", and each of the ca, crl, key and
++format_type+ currently has to be "X509_PEM", and each of the ca, crl, key and
 cert parameters are in the format of PEM strings, and optional.
 +
-The ca_certs is a string that holds a number of CA certificates for use in deciding the
-authenticity of the remote server. The private_key is a PEM string of the unencrypted
++ca_certs+ is a string that holds a number of CA certificates for use in deciding the
+authenticity of the remote server. +private_key+ is a PEM string of the unencrypted
 key for the client, which together with the certificate allows the client to authenticate
 itself to the server.
 
@@ -1057,7 +1116,7 @@ argument which is an instance of +http.ClientResponse+.
 +
 In the +responseListener+ callback, one can add more listeners to the
 response, in particular listening for the +"body"+ event. Note that
-the +responseListener+ is called before any part of the body is receieved,
+the +responseListener+ is called before any part of the body is received,
 so there is no need to worry about racing to catch the first part of the
 body. As long as a listener for +"body"+ is added during the
 +responseListener+ callback, the entire body will be caught.
@@ -1066,7 +1125,7 @@ body. As long as a listener for +"body"+ is added during the
 // Good
 request.finish(function (response) {
   response.addListener("body", function (chunk) {
-    puts("BODY: " + chunk);
+    sys.puts("BODY: " + chunk);
   });
 });
 
@@ -1074,7 +1133,7 @@ request.finish(function (response) {
 request.finish(function (response) {
   setTimeout(function () {
     response.addListener("body", function (chunk) {
-      puts("BODY: " + chunk);
+      sys.puts("BODY: " + chunk);
     });
   }, 10);
 });
@@ -1128,73 +1187,158 @@ After emitted no other events will be emitted on the response.
 
 === Multipart Parsing
 
-A library to parse HTTP requests with +multipart/form-data+ is included with
+A library to parse +multipart+ internet messages is included with
 Node.  To use it, +require("multipart")+.
 
-+multipart.parse(options)+ ::
-  - on success: Returns an object where each key holds the value of one part of
-                the stream. +options+ can either be an instance of
-                +http.ServerRequest+ or an object containing a "boundary" and
-                an optional "data" key.
-  - on error: Returns an instanceof Error object. Right now only the request
-              content-type / boundary option is checked. The stream data itself
-              is not validated.
++multipart.parse(message)+ ::
+  Returns a multipart.Stream wrapper around a streaming message.
+  The message must contain a `headers` member, and may be either an
+  HTTP request object or a JSGI-style request object with either a
+  forEachable or String body.
+  +
+  See the Stream class below.
+
++multipart.cat(message)+ ::
+  Returns a promise.
+  - on success: Returns a multipart.Stream object representing the completed
+                message.  The body of each part is saved on the `body` member.
+  - on error: Returns an instanceof Error object.  This indicates
+              that the message was malformed in some way.
+  +
+  *Note*: This function saves the *entire* message into memory.  As such,
+  it is ill-suited to parsing actual incoming messages from an HTTP request!
+  If a user uploads a very large file, then it may cause serious problems.
+  No checking is done to ensure that the file does not overload the memory.
+  Only use multipart.cat with known and trusted input!
 
 ==== +multipart.Stream+
+
+The multipart.Stream class is a streaming parser wrapped around a message.
+The Stream also contains the properties described for the +part+ objects below,
+and is a reference to the top-level message.
+
+===== Events
+
+[cols="1,2,10",options="header"]
+|=========================================================
+|Event           | Parameters   | Notes
+|+"partBegin"+   | +part+       | Emitted when a new part is found in the stream.
+                                  +part+ is a +part object+, described below.
+|+"partEnd"+     | +part+       | Emitted when a part is done.
+|+"body"+        | +chunk+      | Emitted when a chunk of the body is read.
+|+"complete"+    |              | Emitted when the end of the stream is reached.
+|+"error"+       | +error+      | Emitted when a parse error is encountered. This
+                                  indicates that the message is malformed.
+|=========================================================
+
+===== Properties
+
++stream.part+::
+The current part being processed.  This is important, for instance, when responding
+to the +body+ event.
+
++stream.isMultiPart+::
+True if the stream is a multipart message.  Generally this will be true, but non-multipart
+messages will behave the same as a multipart message with a single part, and +isMultiPart+
+will be set to +false+.
+
++stream.parts+::
+An array of the parts contained within the message.  Each is a +part+ object.
+
+===== Methods
+
++stream.pause+::
+If the underlying message supports pause and resume, then this will pause the stream.
+
++stream.resume+::
+If the underlying message supports pause and resume, then this will resume the paused stream.
+
+==== Part Objects
+
+As it parses the message, the Stream object will create +Part+ objects.
+
+===== Properties
+
++part.parent+::
+The message that contains this part.
+
++part.headers+::
+The headers object for this message.
+
++part.filename+::
+The filename, if specified in the +content-disposition+ or +content-type+ header.
+For uploads, downloads, and attachments, this is the intended filename for the
+attached file.
+
++part.name+::
+The name, if specified in the +content-disposition+ or +content-type+ header.  For
++multipart/form-data+ messages, this is the name of the field that was posted, and the
+body specifies the value.
+
++part.isMultiPart+::
+True if this part is a multipart message.
+
++part.parts+::
+Array of children contained within a multipart message, or falsey.
+
++part.boundary+::
+For multipart messages, this is the boundary that separates subparts.
+
++part.type+::
+For multipart messages, this is the multipart type specified in the +content-type+ header.
+For example, a message with +content-type: multipart/form-data+ will have a +type+
+property of +form-data+.
+
+==== Example
 
 Here is an example for parsing a +multipart/form-data+ request:
 
 ----------------------------------------
-var multipart = require("multipart");
-var stream = new multipart.Stream(options);
-var parts = {};
-
-stream.addListener("part", function (part) {
-  var buffer = "";
-
-  part.addListener("body", function(chunk) {
-    buffer = buffer + chunk;
+var multipart = require("multipart"),
+  sys = require("sys"),
+  http = require("http");
+http.createServer(function (req, res) {
+  var mp = multipart.parse(req),
+    fields = {},
+    name, filename;
+  mp.addListener("error", function (er) {
+    res.sendHeader(400, {"content-type":"text/plain"});
+    res.sendBody("You sent a bad message!\n"+er.message);
+    res.finish();
   });
-
-  part.addListener("complete", function() {
-    parts[part.name] = buffer;
+  mp.addListener("partBegin", function (part) {
+    name = part.name;
+    filename = part.filename;
+    if (name) fields[name] = "";
   });
-});
-
-stream.addListener("complete", function() {
-  // The parts object now contains all parts and data
+  mp.addListener("body", function (chunk) {
+    if (name) {
+      // just a demo.  in reality, you'd probably
+      // want to sniff for base64 encoding, decode,
+      // and write the bytes to a file or something.
+      if (fields[name].length > 1024) return;
+      fields[name] += chunk;
+    }
+  });
+  mp.addListener("complete", function () {
+    var response = "You posted: \n" + sys.inspect(fields);
+    res.sendHeader(200, {
+      "content-type" : "text/plain",
+      "content-length" : response.length
+    });
+    res.sendBody(response);
+    res.finish();
+  })
 });
 ----------------------------------------
 
+==== Nested Multipart Messages
 
-[cols="1,2,10",options="header"]
-|=========================================================
-|Event           | Parameters   | Notes
-|+"part"+        | +part+       | Emitted when a new part is found in the stream.
-                                  +part+ is an instance of +multipart.Part+.
-|+"complete"+    |              | Emitted when the end of the stream is reached.
-|=========================================================
-
-+stream.bytesTotal+::
-The amount of bytes this stream is expected to have.
-
-+stream.bytesReceived+::
-The amount of bytes received by this stream so far.
-
-==== +multipart.Part+
-
-[cols="1,2,10",options="header"]
-|=========================================================
-|Event           | Parameters   | Notes
-|+"body"+        | +chunk+      | Emitted when a chunk of body is read.
-|+"complete"+    |              | Emitted when the end of the part is reached.
-|=========================================================
-
-+part.name+::
-The field name of this part.
-
-+part.filename+::
-The filename of this part. Only set for file uploads.
+Nested multipart parsing is supported. The +stream.part+ object always refers
+to the current part. If +part.isMultiPart+ is set, then that part is a
+multipart message, which contains other parts. You can inspect its +parts+
+array to see the list of sub-parts, which may also be multipart, and contain
+sub-parts.
 
 === TCP
 
@@ -1203,7 +1347,7 @@ To use the TCP server and client one must +require("tcp")+.
 ==== +tcp.Server+
 
 Here is an example of a echo server which listens for connections
-on port 7000
+on port 7000:
 
 ----------------------------------------
 var tcp = require("tcp");
@@ -1212,10 +1356,10 @@ var server = tcp.createServer(function (socket) {
   socket.addListener("connect", function () {
     socket.send("hello\r\n");
   });
-  socket.addListener("receive", function (data) {
+  socket.addListener("data", function (data) {
     socket.send(data);
   });
-  socket.addListener("eof", function () {
+  socket.addListener("end", function () {
     socket.send("goodbye\r\n");
     socket.close();
   });
@@ -1244,12 +1388,12 @@ the +"connection"+ event.
 +server.setSecure(format_type, ca_certs, crl_list, private_key, certificate)+ ::
 Enable TLS for all incoming connections, with the specified credentials.
 +
-format_type currently has to be "X509_PEM", and each of the ca, crl, key and
++format_type+ currently has to be "X509_PEM", and each of the ca, crl, key and
 cert parameters are in the format of PEM strings. 
 +
-The ca_certs is a string that holds a number of CA certificates for use in accepting
++ca_certs+ is a string that holds a number of CA certificates for use in accepting
 client connections that authenticate themselves with a client certificate. 
-The private_key is a PEM string of the unencrypted key for the server.
++private_key+ is a PEM string of the unencrypted key for the server.
 
 +server.listen(port, host=null, backlog=128)+ ::
 Tells the server to listen for TCP connections to +port+ and +host+.
@@ -1280,11 +1424,11 @@ socket for +tcp.Server+.
 |+"connect"+     |              | Call once the connection is established
                                   after a call to +createConnection()+ or
                                   +connect()+.
-|+"receive"+     | +data+       | Called when data is received on the
+|+"data"+        | +data+       | Called when data is received on the
                                   connection.  +data+ will be a string.
                                   Encoding of data is set by
                                   +connection.setEncoding()+. 
-|+"eof"+         |              | Called when the other end of the
+|+"end"+         |              | Called when the other end of the
                                   connection sends a FIN packet.
                                   After this is emitted the +readyState+
                                   will be +"writeOnly"+. One should probably
@@ -1350,7 +1494,7 @@ Ensures that no more I/O activity happens on this socket. Only
 necessary in case of errors (parse error or so).
 
 +connection.readPause()+::
-Pauses the reading of data. That is, +"receive"+ events will not be emitted.
+Pauses the reading of data. That is, +"data"+ events will not be emitted.
 Useful to throttle back an upload.
 
 +connection.readResume()+::
@@ -1389,53 +1533,83 @@ in RFC2253. This function is synchronous.
 
 === DNS module
 
-Use +require("dns")+ to access this module
+Use +require("dns")+ to access this module.
 
-Here is an example of which resolves +"www.google.com"+ then reverse
+Here is an example which resolves +"www.google.com"+ then reverse
 resolves the IP addresses which are returned.
 
 -------------------------------------------------------------------------
-var dns = require("dns");
+var dns = require("dns"),
+    sys = require("sys");
 
 var resolution = dns.resolve4("www.google.com");
 
 resolution.addCallback(function (addresses, ttl, cname) {
-  puts("addresses: " + JSON.stringify(addresses));
-  puts("ttl: " + JSON.stringify(ttl));
-  puts("cname: " + JSON.stringify(cname));
+  sys.puts("addresses: " + JSON.stringify(addresses));
+  sys.puts("ttl: " + JSON.stringify(ttl));
+  sys.puts("cname: " + JSON.stringify(cname));
 
   for (var i = 0; i < addresses.length; i++) {
     var a = addresses[i];
     var reversing = dns.reverse(a);
     reversing.addCallback( function (domains, ttl, cname) {
-      puts("reverse for " + a + ": " + JSON.stringify(domains));
+      sys.puts("reverse for " + a + ": " + JSON.stringify(domains));
     });
-    reversing.addErrback( function (code, msg) {
-      puts("reverse for " + a + " failed: " + msg);
+    reversing.addErrback( function (e) {
+      puts("reverse for " + a + " failed: " + e.message);
     });
   }
 });
 
-resolution.addErrback(function (code, msg) {
-  puts("error: " + msg);
+resolution.addErrback(function (e) {
+  puts("error: " + e.message);
 });
 -------------------------------------------------------------------------
 
++dns.resolve(domain, rrtype = 'A')+::
 
-+dns.resolve4(domain)+::
-
-Resolves a domain (e.g. +"google.com"+) into an array of IPv4 addresses (e.g.
-+["74.125.79.104", "74.125.79.105", "74.125.79.106"]+).
+Resolves a domain (e.g. +"google.com"+) into an array of the record types
+specified by rrtype. Valid rrtypes are +A+ (IPV4 addresses), +AAAA+ (IPV6
+addresses), +MX+ (mail exchange records), +TXT+ (text records), +SRV+
+(SRV records), and +PTR+ (used for reverse IP lookups).
 This function returns a promise.
 - on success: returns +addresses, ttl, cname+. +ttl+ (time-to-live) is an integer
   specifying the number of seconds this result is valid for. +cname+ is the
   canonical name for the query.
-- on error: returns +code, msg+. +code+ is one of the error codes listed
-  below and +msg+ is a string describing the error in English.
+  The type of each item in +addresses+ is determined by the record type, and
+  described in the documentation for the corresponding lookup methods below.
+- on error: Returns an instanceof Error object, where the "errno" field is one
+  of the error codes listed below and the "message" field is a string
+  describing the error in English.
+
++dns.resolve4(domain)+::
+
+The same as +dns.resolve()+, but only for IPv4 queries (+A+ records). 
++addresses+ is an array of IPv4 addresses (e.g.  +["74.125.79.104",
+"74.125.79.105", "74.125.79.106"]+).
 
 +dns.resolve6(domain)+::
 
 The same as +dns.resolve4()+ except for IPv6 queries (an +AAAA+ query).
+
++dns.resolveMx(domain)+::
+
+The same as +dns.resolve()+, but only for mail exchange queries (+MX+ records).
++addresses+ is an array of MX records, each with a priority and an exchange
+attribute (e.g. +[{"priority": 10, "exchange": "mx.example.com"},...]+).
+
++dns.resolveTxt(domain)+::
+
+The same as +dns.resolve()+, but only for text queries (+TXT+ records).
++addresses+ is an array of the text records available for +domain+ (e.g.,
++["v=spf1 ip4:0.0.0.0 ~all"]+).
+
++dns.resolveSrv(domain)+::
+
+The same as +dns.resolve()+, but only for service records (+SRV+ records).
++addresses+ is an array of the SRV records available for +domain+. Properties
+of SRV records are priority, weight, port, and name (e.g., +[{"priority": 10,
+{"weight": 5, "port": 21223, "name": "service.example.com"}, ...]+).
 
 +dns.reverse(ip)+::
 
@@ -1444,8 +1618,9 @@ Reverse resolves an ip address to an array of domain names.
 - on success: returns +domains, ttl, cname+. +ttl+ (time-to-live) is an integer
   specifying the number of seconds this result is valid for. +cname+ is the
   canonical name for the query. +domains+ is an array of domains.
-- on error: returns +code, msg+. +code+ is one of the error codes listed
-  below and +msg+ is a string describing the error in English.
+- on error: Returns an instanceof Error object, where the "errno" field is one
+  of the error codes listed below and the "message" field is a string
+  describing the error in English.
 
 
 Each DNS query can return an error code.
@@ -1480,10 +1655,10 @@ Tests for deep equality.
 Tests for any deep inequality. 
 
 +assert.strictEqual(actual, expected, message)+::
-Tests strict equality, as determined by bitwise equality operator ( +===+ ) 
+Tests strict equality, as determined by the strict equality operator ( +===+ ) 
 
 +assert.notStrictEqual(actual, expected, message)+::
-Tests strict non-equality, as determined by bitwise not equal operator ( +!==+ ) 
+Tests strict non-equality, as determined by the strict not equal operator ( +!==+ ) 
 
 +assert.throws(block, error, message)+::
 Expects +block+ to throw an error.
@@ -1495,7 +1670,7 @@ Expects +block+ not to throw an error.
 === Path Module
 
 This module contains utilities for dealing with file paths.  Use
-+require('path')+ to use it.  It provides the following methods:
++require("path")+ to use it.  It provides the following methods:
 
 +path.join(/* path1, path2, ... */)+::
 Join all arguments together and resolve the resulting path.  Example:
@@ -1543,9 +1718,9 @@ node> require("path").dirname("/foo/bar/baz/asdf/quux")
 Return the last portion of a path.  Similar to the Unix +basename+ command.  Example:
 +
 ------------------------------------
-node> require("path").filename("/foo/bar/baz/asdf/quux.html")
+node> require("path").basename("/foo/bar/baz/asdf/quux.html")
 "quux.html"
-node> require("path").filename("/foo/bar/baz/asdf/quux.html", ".html")
+node> require("path").basename("/foo/bar/baz/asdf/quux.html", ".html")
 "quux"
 ------------------------------------
 +
@@ -1612,7 +1787,7 @@ Either the "params" portion of the query string, or a querystring-parsed object.
 +"query=string"+ or +{"query":"string"}+
 
 +hash+::
-The portion of the URL after the pound-sign.  Example: +"#hash"+
+The "fragment" portion of the URL including the pound-sign. Example: +"#hash"+
 
 The following methods are provided by the URL module:
 
@@ -1659,10 +1834,10 @@ node> require("querystring").parse("foo=bar&baz%5Bquux%5D=asdf&baz%5Boof%5D=rab&
 ------------------------------------
 +
 
-+querystring.escape+
++querystring.escape+::
 The escape function used by +querystring.stringify+, provided so that it could be overridden if necessary.
 
-+querystring.unescape+
++querystring.unescape+::
 The unescape function used by +querystring.parse+, provided so that it could be overridden if necessary.
 
 == REPL
@@ -1708,7 +1883,7 @@ Addons are dynamically linked shared objects. They can provide glue to C and
 C++ libraries. The API (at the moment) is rather complex, involving
 knowledge of several libraries:
 
- - V8 Javascript, a C++ library. Used for interfacing with Javascript:
+ - V8 JavaScript, a C++ library. Used for interfacing with JavaScript:
    creating objects, calling functions, etc.  Documented mostly in the
    +v8.h+ header file (+deps/v8/include/v8.h+ in the Node source tree).
 

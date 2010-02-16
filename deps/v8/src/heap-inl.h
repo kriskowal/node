@@ -54,7 +54,8 @@ Object* Heap::AllocateRaw(int size_in_bytes,
   ASSERT(allocation_allowed_ && gc_state_ == NOT_IN_GC);
   ASSERT(space != NEW_SPACE ||
          retry_space == OLD_POINTER_SPACE ||
-         retry_space == OLD_DATA_SPACE);
+         retry_space == OLD_DATA_SPACE ||
+         retry_space == LO_SPACE);
 #ifdef DEBUG
   if (FLAG_gc_interval >= 0 &&
       !disallow_allocation_failure_ &&
@@ -151,7 +152,11 @@ Object* Heap::AllocateRawCell() {
 
 
 bool Heap::InNewSpace(Object* object) {
-  return new_space_.Contains(object);
+  bool result = new_space_.Contains(object);
+  ASSERT(!result ||                  // Either not in new space
+         gc_state_ != NOT_IN_GC ||   // ... or in the middle of GC
+         InToSpace(object));         // ... or in to-space (where we allocate).
+  return result;
 }
 
 
@@ -196,12 +201,23 @@ AllocationSpace Heap::TargetSpaceId(InstanceType type) {
   // other object types are promoted to old pointer space.  We do not use
   // object->IsHeapNumber() and object->IsSeqString() because we already
   // know that object has the heap object tag.
-  ASSERT((type != CODE_TYPE) && (type != MAP_TYPE));
-  bool has_pointers =
-      type != HEAP_NUMBER_TYPE &&
-      (type >= FIRST_NONSTRING_TYPE ||
-       (type & kStringRepresentationMask) != kSeqStringTag);
-  return has_pointers ? OLD_POINTER_SPACE : OLD_DATA_SPACE;
+
+  // These objects are never allocated in new space.
+  ASSERT(type != MAP_TYPE);
+  ASSERT(type != CODE_TYPE);
+  ASSERT(type != ODDBALL_TYPE);
+  ASSERT(type != JS_GLOBAL_PROPERTY_CELL_TYPE);
+
+  if (type < FIRST_NONSTRING_TYPE) {
+    // There are three string representations: sequential strings, cons
+    // strings, and external strings.  Only cons strings contain
+    // non-map-word pointers to heap objects.
+    return ((type & kStringRepresentationMask) == kConsStringTag)
+        ? OLD_POINTER_SPACE
+        : OLD_DATA_SPACE;
+  } else {
+    return (type <= LAST_DATA_TYPE) ? OLD_DATA_SPACE : OLD_POINTER_SPACE;
+  }
 }
 
 

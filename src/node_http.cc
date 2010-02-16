@@ -27,7 +27,7 @@ static Persistent<String> header_field_symbol;
 static Persistent<String> header_value_symbol;
 static Persistent<String> header_complete_symbol;
 static Persistent<String> body_symbol;
-static Persistent<String> eof_symbol;
+static Persistent<String> end_symbol;
 
 static Persistent<String> delete_sym;
 static Persistent<String> get_sym;
@@ -66,7 +66,7 @@ HTTPConnection::Initialize (Handle<Object> target)
   NODE_SET_PROTOTYPE_METHOD(server_constructor_template, "resetParser", ResetParser);
   server_constructor_template->SetClassName(String::NewSymbol("ServerSideConnection"));
 
-  eof_symbol = NODE_PSYMBOL("eof");
+  end_symbol = NODE_PSYMBOL("end");
 
 }
 
@@ -123,14 +123,12 @@ HTTPConnection::OnEOF ()
   assert(refs_);
   size_t nparsed;
   nparsed = http_parser_execute(&parser_, NULL, 0);
-  Emit(eof_symbol, 0, NULL);
+  Emit(end_symbol, 0, NULL);
 }
 
 int
 HTTPConnection::on_message_begin (http_parser *parser)
 {
-  HandleScope scope;
-
   if (message_begin_symbol.IsEmpty()) {
     method_symbol = NODE_PSYMBOL("method");
     status_code_symbol = NODE_PSYMBOL("statusCode");
@@ -186,7 +184,6 @@ HTTPConnection::on_message_complete (http_parser *parser)
 int
 HTTPConnection::on_url (http_parser *parser, const char *buf, size_t len)
 {
-  HandleScope scope;
   HTTPConnection *connection = static_cast<HTTPConnection*>(parser->data);
   assert(connection->refs_);
   Local<Value> argv[1] = { String::New(buf, len) };
@@ -197,7 +194,6 @@ HTTPConnection::on_url (http_parser *parser, const char *buf, size_t len)
 int
 HTTPConnection::on_query_string (http_parser *parser, const char *buf, size_t len)
 {
-  HandleScope scope;
   HTTPConnection *connection = static_cast<HTTPConnection*>(parser->data);
   assert(connection->refs_);
   Local<Value> argv[1] = { String::New(buf, len) };
@@ -208,7 +204,6 @@ HTTPConnection::on_query_string (http_parser *parser, const char *buf, size_t le
 int
 HTTPConnection::on_path (http_parser *parser, const char *buf, size_t len)
 {
-  HandleScope scope;
   HTTPConnection *connection = static_cast<HTTPConnection*>(parser->data);
   assert(connection->refs_);
   Local<Value> argv[1] = { String::New(buf, len) };
@@ -219,7 +214,6 @@ HTTPConnection::on_path (http_parser *parser, const char *buf, size_t len)
 int
 HTTPConnection::on_fragment (http_parser *parser, const char *buf, size_t len)
 {
-  HandleScope scope;
   HTTPConnection *connection = static_cast<HTTPConnection*>(parser->data);
   assert(connection->refs_);
   Local<Value> argv[1] = { String::New(buf, len) };
@@ -240,7 +234,6 @@ const static char normalizer[] =
 int
 HTTPConnection::on_header_field (http_parser *parser, const char *buf, size_t len)
 {
-  HandleScope scope;
   HTTPConnection *connection = static_cast<HTTPConnection*>(parser->data);
   assert(connection->refs_);
 
@@ -257,7 +250,6 @@ HTTPConnection::on_header_field (http_parser *parser, const char *buf, size_t le
 int
 HTTPConnection::on_header_value (http_parser *parser, const char *buf, size_t len)
 {
-  HandleScope scope;
   HTTPConnection *connection = static_cast<HTTPConnection*>(parser->data);
   assert(connection->refs_);
 
@@ -293,7 +285,6 @@ HTTPConnection::on_headers_complete (http_parser *parser)
 {
   HTTPConnection *connection = static_cast<HTTPConnection*> (parser->data);
   assert(connection->refs_);
-  HandleScope scope;
 
   Local<Object> message_info = Object::New();
 
@@ -339,7 +330,6 @@ HTTPConnection::on_body (http_parser *parser, const char *buf, size_t len)
 
   HTTPConnection *connection = static_cast<HTTPConnection*> (parser->data);
   assert(connection->refs_);
-  HandleScope scope;
 
   // TODO each message should have their encoding.
   // don't look at the conneciton for encoding

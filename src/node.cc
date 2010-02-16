@@ -9,11 +9,14 @@
 #include <unistd.h>
 #include <errno.h>
 #include <dlfcn.h> /* dlopen(), dlsym() */
+#include <sys/types.h>
+#include <unistd.h> /* setuid, getuid */
 
 #include <node_events.h>
 #include <node_dns.h>
 #include <node_net.h>
 #include <node_file.h>
+#include <node_idle_watcher.h>
 #include <node_http.h>
 #include <node_signal_handler.h>
 #include <node_stat.h>
@@ -197,7 +200,6 @@ ssize_t DecodeBytes(v8::Handle<v8::Value> val, enum encoding encoding) {
 ssize_t DecodeWrite(char *buf, size_t buflen,
                     v8::Handle<v8::Value> val,
                     enum encoding encoding) {
-  size_t i;
   HandleScope scope;
 
   // XXX
@@ -316,15 +318,15 @@ const char* ToCString(const v8::String::Utf8Value& value) {
   return *value ? *value : "<str conversion failed>";
 }
 
-static void ReportException(TryCatch *try_catch) {
-  Handle<Message> message = try_catch->Message();
+static void ReportException(TryCatch &try_catch, bool show_line = false) {
+  Handle<Message> message = try_catch.Message();
   if (message.IsEmpty()) {
     fprintf(stderr, "Error: (no message)\n");
     fflush(stderr);
     return;
   }
 
-  Handle<Value> error = try_catch->Exception();
+  Handle<Value> error = try_catch.Exception();
   Handle<String> stack;
 
   if (error->IsObject()) {
@@ -333,7 +335,7 @@ static void ReportException(TryCatch *try_catch) {
     if (raw_stack->IsString()) stack = Handle<String>::Cast(raw_stack);
   }
 
-  if (stack.IsEmpty()) {
+  if (show_line) {
     // Print (filename):(line number): (message).
     String::Utf8Value filename(message->GetScriptResourceName());
     const char* filename_string = ToCString(filename);
@@ -353,7 +355,9 @@ static void ReportException(TryCatch *try_catch) {
       fprintf(stderr, "^");
     }
     fprintf(stderr, "\n");
+  }
 
+  if (stack.IsEmpty()) {
     message->PrintCurrentStackTrace(stderr);
   } else {
     String::Utf8Value trace(stack);
@@ -363,20 +367,19 @@ static void ReportException(TryCatch *try_catch) {
 }
 
 // Executes a str within the current v8 context.
-Handle<Value> ExecuteString(v8::Handle<v8::String> source,
-                            v8::Handle<v8::Value> filename) {
+Local<Value> ExecuteString(Local<String> source, Local<Value> filename) {
   HandleScope scope;
   TryCatch try_catch;
 
-  Handle<Script> script = Script::Compile(source, filename);
+  Local<Script> script = Script::Compile(source, filename);
   if (script.IsEmpty()) {
-    ReportException(&try_catch);
+    ReportException(try_catch);
     exit(1);
   }
 
-  Handle<Value> result = script->Run();
+  Local<Value> result = script->Run();
   if (result.IsEmpty()) {
-    ReportException(&try_catch);
+    ReportException(try_catch);
     exit(1);
   }
 
@@ -421,15 +424,15 @@ static Handle<Value> Unloop(const Arguments& args) {
 
 static Handle<Value> Chdir(const Arguments& args) {
   HandleScope scope;
-  
+
   if (args.Length() != 1 || !args[0]->IsString()) {
     return ThrowException(Exception::Error(String::New("Bad argument.")));
   }
-  
+
   String::Utf8Value path(args[0]->ToString());
-  
+
   int r = chdir(*path);
-  
+
   if (r != 0) {
     return ThrowException(Exception::Error(String::New(strerror(errno))));
   }
@@ -453,24 +456,93 @@ static Handle<Value> Cwd(const Arguments& args) {
 static Handle<Value> Umask(const Arguments& args){
   HandleScope scope;
 
-  if(args.Length() < 1 || !args[0]->IsInt32()) {		
+  if(args.Length() < 1 || !args[0]->IsInt32()) {
     return ThrowException(Exception::TypeError(
           String::New("argument must be an integer.")));
   }
   unsigned int mask = args[0]->Uint32Value();
   unsigned int old = umask((mode_t)mask);
-  
+
   return scope.Close(Uint32::New(old));
 }
 
-v8::Handle<v8::Value> Exit(const v8::Arguments& args) {
-  int r = 0;
-  if (args.Length() > 0)
-    r = args[0]->IntegerValue();
-  fflush(stderr);
-  exit(r);
+
+static Handle<Value> GetUid(const Arguments& args) {
+  HandleScope scope;
+  int uid = getuid();
+  return scope.Close(Integer::New(uid));
+}
+
+
+static Handle<Value> SetUid(const Arguments& args) {
+  HandleScope scope;
+
+  if (args.Length() < 1) {
+    return ThrowException(Exception::Error(
+          String::New("setuid requires 1 argument")));
+  }
+
+  Local<Integer> given_uid = args[0]->ToInteger();
+  int uid = given_uid->Int32Value();
+  int result;
+  if ((result = setuid(uid)) != 0) {
+    return ThrowException(Exception::Error(String::New(strerror(errno))));
+  }
   return Undefined();
 }
+
+
+v8::Handle<v8::Value> Exit(const v8::Arguments& args) {
+  HandleScope scope;
+  fflush(stderr);
+  Stdio::Flush();
+  exit(args[0]->IntegerValue());
+  return Undefined();
+}
+
+#ifdef __sun
+#define HAVE_GETMEM 1
+#include <unistd.h> /* getpagesize() */
+
+#if (!defined(_LP64)) && (_FILE_OFFSET_BITS - 0 == 64)
+#define PROCFS_FILE_OFFSET_BITS_HACK 1
+#undef _FILE_OFFSET_BITS
+#else
+#define PROCFS_FILE_OFFSET_BITS_HACK 0
+#endif
+
+#include <procfs.h>
+
+#if (PROCFS_FILE_OFFSET_BITS_HACK - 0 == 1)
+#define _FILE_OFFSET_BITS 64
+#endif
+
+int getmem(size_t *rss, size_t *vsize) {
+  pid_t pid = getpid();
+
+  size_t page_size = getpagesize();
+  char pidpath[1024];
+  sprintf(pidpath, "/proc/%d/psinfo", pid);
+
+  psinfo_t psinfo;
+  FILE *f = fopen(pidpath, "r");
+  if (!f) return -1;
+
+  if (fread(&psinfo, sizeof(psinfo_t), 1, f) != 1) {
+    fclose (f);
+    return -1;
+  }
+
+  /* XXX correct? */
+
+  *vsize = (size_t) psinfo.pr_size * page_size;
+  *rss = (size_t) psinfo.pr_rssize * 1024;
+
+  fclose (f);
+
+  return 0;
+}
+#endif
 
 
 #ifdef __FreeBSD__
@@ -664,11 +736,11 @@ v8::Handle<v8::Value> MemoryUsage(const v8::Arguments& args) {
 
 v8::Handle<v8::Value> Kill(const v8::Arguments& args) {
   HandleScope scope;
-  
+
   if (args.Length() < 1 || !args[0]->IsNumber()) {
     return ThrowException(Exception::Error(String::New("Bad argument.")));
   }
-  
+
   pid_t pid = args[0]->IntegerValue();
 
   int sig = SIGTERM;
@@ -736,7 +808,7 @@ Handle<Value> DLOpen(const v8::Arguments& args) {
   return Undefined();
 }
 
-v8::Handle<v8::Value> Compile(const v8::Arguments& args) {
+Handle<Value> Compile(const Arguments& args) {
   HandleScope scope;
 
   if (args.Length() < 2) {
@@ -747,11 +819,17 @@ v8::Handle<v8::Value> Compile(const v8::Arguments& args) {
   Local<String> source = args[0]->ToString();
   Local<String> filename = args[1]->ToString();
 
-  Handle<Script> script = Script::Compile(source, filename);
-  if (script.IsEmpty()) return Undefined();
+  TryCatch try_catch;
 
-  Handle<Value> result = script->Run();
-  if (result.IsEmpty()) return Undefined();
+  Local<Script> script = Script::Compile(source, filename);
+  if (try_catch.HasCaught()) {
+    // Hack because I can't get a proper stacktrace on SyntaxError
+    ReportException(try_catch, true);
+    exit(1);
+  }
+
+  Local<Value> result = script->Run();
+  if (try_catch.HasCaught()) return try_catch.ReThrow();
 
   return scope.Close(result);
 }
@@ -772,7 +850,7 @@ void FatalException(TryCatch &try_catch) {
 
   // Check if uncaught_exception_counter indicates a recursion
   if (uncaught_exception_counter > 0) {
-    ReportException(&try_catch);
+    ReportException(try_catch);
     exit(1);
   }
 
@@ -798,7 +876,7 @@ void FatalException(TryCatch &try_catch) {
   uint32_t length = listener_array->Length();
   // Report and exit if process has no "uncaughtException" listener
   if (length == 0) {
-    ReportException(&try_catch);
+    ReportException(try_catch);
     exit(1);
   }
 
@@ -824,8 +902,7 @@ static void DebugMessageCallback(EV_P_ ev_async *watcher, int revents) {
   HandleScope scope;
   assert(watcher == &debug_watcher);
   assert(revents == EV_ASYNC);
-  ExecuteString(String::New("1+1;"),
-                String::New("debug_poll"));
+  ExecuteString(String::New("1+1;"), String::New("debug_poll"));
 }
 
 static void DebugMessageDispatch(void) {
@@ -838,35 +915,17 @@ static void DebugMessageDispatch(void) {
 }
 
 
-static void ExecuteNativeJS(const char *filename, const char *data) {
+static void Load(int argc, char *argv[]) {
   HandleScope scope;
-  TryCatch try_catch;
-  ExecuteString(String::New(data), String::New(filename));
-  // There should not be any syntax errors in these file!
-  // If there are exit the process.
-  if (try_catch.HasCaught())  {
-    puts("There is an error in Node's built-in javascript");
-    puts("This should be reported as a bug!");
-    ReportException(&try_catch);
-    exit(1);
-  }
-}
-
-static Local<Object> Load(int argc, char *argv[]) {
-  HandleScope scope;
-
-  Local<Object> global = Context::GetCurrent()->Global();
-
-  // Assign the global object to it's place as 'GLOBAL'
-  global->Set(String::NewSymbol("GLOBAL"), global);
 
   Local<FunctionTemplate> process_template = FunctionTemplate::New();
   node::EventEmitter::Initialize(process_template);
 
   process = Persistent<Object>::New(process_template->GetFunction()->NewInstance());
 
-  // Assign the process object to its place.
-  global->Set(String::NewSymbol("process"), process);
+  // Add a reference to the global object
+  Local<Object> global = Context::GetCurrent()->Global();
+  process->Set(String::NewSymbol("global"), global);
 
   // process.version
   process->Set(String::NewSymbol("version"), String::New(NODE_VERSION));
@@ -878,7 +937,7 @@ static Local<Object> Load(int argc, char *argv[]) {
 #define str(s) #s
   process->Set(String::NewSymbol("platform"), String::New(xstr(PLATFORM)));
 
-  // process.ARGV
+  // process.argv
   int i, j;
   Local<Array> arguments = Array::New(argc - dash_dash_index + 1);
   arguments->Set(Integer::New(0), String::New(argv[0]));
@@ -888,8 +947,9 @@ static Local<Object> Load(int argc, char *argv[]) {
   }
   // assign it
   process->Set(String::NewSymbol("ARGV"), arguments);
+  process->Set(String::NewSymbol("argv"), arguments);
 
-  // create process.ENV
+  // create process.env
   Local<Object> env = Object::New();
   for (i = 0; environ[i]; i++) {
     // skip entries without a '=' character
@@ -905,6 +965,8 @@ static Local<Object> Load(int argc, char *argv[]) {
   }
   // assign process.ENV
   process->Set(String::NewSymbol("ENV"), env);
+  process->Set(String::NewSymbol("env"), env);
+
   process->Set(String::NewSymbol("pid"), Integer::New(getpid()));
 
   // define various internal methods
@@ -915,6 +977,8 @@ static Local<Object> Load(int argc, char *argv[]) {
   NODE_SET_METHOD(process, "reallyExit", Exit);
   NODE_SET_METHOD(process, "chdir", Chdir);
   NODE_SET_METHOD(process, "cwd", Cwd);
+  NODE_SET_METHOD(process, "getuid", GetUid);
+  NODE_SET_METHOD(process, "setuid", SetUid);
   NODE_SET_METHOD(process, "umask", Umask);
   NODE_SET_METHOD(process, "dlopen", DLOpen);
   NODE_SET_METHOD(process, "kill", Kill);
@@ -932,6 +996,7 @@ static Local<Object> Load(int argc, char *argv[]) {
 
 
   // Initialize the C++ modules..................filename of module
+  IdleWatcher::Initialize(process);            // idle_watcher.cc
   Stdio::Initialize(process);                  // stdio.cc
   Timer::Initialize(process);                  // timer.cc
   SignalHandler::Initialize(process);          // signal_handler.cc
@@ -958,11 +1023,46 @@ static Local<Object> Load(int argc, char *argv[]) {
   HTTPServer::Initialize(http);                 // http.cc
   HTTPConnection::Initialize(http);             // http.cc
 
-  // Compile, execute the src/*.js files. (Which were included a static C
-  // strings in node_natives.h)
-  // In node.js we actually load the file specified in ARGV[1]
-  // so your next reading stop should be node.js!
-  ExecuteNativeJS("node.js", native_node);
+
+
+  // Compile, execute the src/node.js file. (Which was included as static C
+  // string in node_natives.h. 'natve_node' is the string containing that
+  // source code.)
+
+  // The node.js file returns a function 'f'
+
+#ifndef NDEBUG
+  TryCatch try_catch;
+#endif
+
+  Local<Value> f_value = ExecuteString(String::New(native_node),
+                                       String::New("node.js"));
+#ifndef NDEBUG
+  if (try_catch.HasCaught())  {
+    ReportException(try_catch);
+    exit(10);
+  }
+#endif
+  assert(f_value->IsFunction());
+  Local<Function> f = Local<Function>::Cast(f_value);
+
+  // Now we call 'f' with the 'process' variable that we've built up with
+  // all our bindings. Inside node.js we'll take care of assigning things to
+  // their places.
+
+  // We start the process this way in order to be more modular. Developers
+  // who do not like how 'src/node.js' setups the module system but do like
+  // Node's I/O bindings may want to replace 'f' with their own function.
+
+  Local<Value> args[1] = { Local<Value>::New(process) };
+  f->Call(global, 1, args);
+
+#ifndef NDEBUG
+  if (try_catch.HasCaught())  {
+    ReportException(try_catch);
+    exit(11);
+  }
+#endif
 }
 
 static void PrintHelp() {
@@ -971,7 +1071,7 @@ static void PrintHelp() {
          "  --debug          enable remote debugging\n" // TODO specify port
          "  --cflags         print pre-processor and compiler flags\n"
          "  --v8-options     print v8 command line options\n\n"
-         "Documentation can be found at http://tinyclouds.org/node/api.html"
+         "Documentation can be found at http://nodejs.org/api.html"
          " or with 'man node'\n");
 }
 
@@ -1085,6 +1185,8 @@ int main(int argc, char *argv[]) {
   // Create all the objects, load modules, do everything.
   // so your next reading stop should be node::Load()!
   node::Load(argc, argv);
+
+  node::Stdio::Flush();
 
 #ifndef NDEBUG
   // Clean up.

@@ -1,4 +1,4 @@
-// Copyright 2009 the V8 project authors. All rights reserved.
+// Copyright 2010 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -129,11 +129,29 @@ void VirtualFrame::AllocateStackSlots() {
     Handle<Object> undefined = Factory::undefined_value();
     FrameElement initial_value =
         FrameElement::ConstantElement(undefined, FrameElement::SYNCED);
-    __ movq(kScratchRegister, undefined, RelocInfo::EMBEDDED_OBJECT);
+    if (count == 1) {
+      __ Push(undefined);
+    } else if (count < kLocalVarBound) {
+      // For less locals the unrolled loop is more compact.
+      __ movq(kScratchRegister, undefined, RelocInfo::EMBEDDED_OBJECT);
+      for (int i = 0; i < count; i++) {
+        __ push(kScratchRegister);
+      }
+    } else {
+      // For more locals a loop in generated code is more compact.
+      Label alloc_locals_loop;
+      Result cnt = cgen()->allocator()->Allocate();
+      ASSERT(cnt.is_valid());
+      __ movq(cnt.reg(), Immediate(count));
+      __ movq(kScratchRegister, undefined, RelocInfo::EMBEDDED_OBJECT);
+      __ bind(&alloc_locals_loop);
+      __ push(kScratchRegister);
+      __ decl(cnt.reg());
+      __ j(not_zero, &alloc_locals_loop);
+    }
     for (int i = 0; i < count; i++) {
       elements_.Add(initial_value);
       stack_pointer_++;
-      __ push(kScratchRegister);
     }
   }
 }
@@ -1028,31 +1046,45 @@ Result VirtualFrame::CallConstructor(int arg_count) {
 
 Result VirtualFrame::CallStoreIC() {
   // Name, value, and receiver are on top of the frame.  The IC
-  // expects name in rcx, value in rax, and receiver on the stack.  It
-  // does not drop the receiver.
+  // expects name in rcx, value in rax, and receiver in edx.
   Handle<Code> ic(Builtins::builtin(Builtins::StoreIC_Initialize));
   Result name = Pop();
   Result value = Pop();
-  PrepareForCall(1, 0);  // One stack arg, not callee-dropped.
+  Result receiver = Pop();
+  PrepareForCall(0, 0);
 
-  if (value.is_register() && value.reg().is(rcx)) {
-    if (name.is_register() && name.reg().is(rax)) {
-      // Wrong registers.
-      __ xchg(rax, rcx);
-    } else {
-      // Register rax is free for value, which frees rcx for name.
-      value.ToRegister(rax);
+  // Optimized for case in which name is a constant value.
+  if (name.is_register() && (name.reg().is(rdx) || name.reg().is(rax))) {
+    if (!is_used(rcx)) {
       name.ToRegister(rcx);
+    } else if (!is_used(rbx)) {
+      name.ToRegister(rbx);
+    } else {
+      ASSERT(!is_used(rdi));  // Only three results are live, so rdi is free.
+      name.ToRegister(rdi);
+    }
+  }
+  // Now name is not in edx or eax, so we can fix them, then move name to ecx.
+  if (value.is_register() && value.reg().is(rdx)) {
+    if (receiver.is_register() && receiver.reg().is(rax)) {
+      // Wrong registers.
+      __ xchg(rax, rdx);
+    } else {
+      // Register rax is free for value, which frees rcx for receiver.
+      value.ToRegister(rax);
+      receiver.ToRegister(rdx);
     }
   } else {
-    // Register rcx is free for name, which guarantees rax is free for
+    // Register rcx is free for receiver, which guarantees rax is free for
     // value.
-    name.ToRegister(rcx);
+    receiver.ToRegister(rdx);
     value.ToRegister(rax);
   }
-
+  // Receiver and value are in the right place, so rcx is free for name.
+  name.ToRegister(rcx);
   name.Unuse();
   value.Unuse();
+  receiver.Unuse();
   return RawCallCodeObject(ic, RelocInfo::CODE_TARGET);
 }
 

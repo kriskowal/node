@@ -305,6 +305,14 @@ class Space : public Malloced {
   virtual void Print() = 0;
 #endif
 
+  // After calling this we can allocate a certain number of bytes using only
+  // linear allocation (with a LinearAllocationScope and an AlwaysAllocateScope)
+  // without using freelists or causing a GC.  This is used by partial
+  // snapshots.  It returns true of space was reserved or false if a GC is
+  // needed.  For paged spaces the space requested must include the space wasted
+  // at the end of each when allocating linearly.
+  virtual bool ReserveSpace(int bytes) = 0;
+
  private:
   AllocationSpace id_;
   Executability executable_;
@@ -430,12 +438,15 @@ class MemoryAllocator : public AllStatic {
   // and false otherwise.
   static bool CommitBlock(Address start, size_t size, Executability executable);
 
-
   // Uncommit a contiguous block of memory [start..(start+size)[.
   // start is not NULL, the size is greater than zero, and the
   // block is contained in the initial chunk.  Returns true if it succeeded
   // and false otherwise.
   static bool UncommitBlock(Address start, size_t size);
+
+  // Zaps a contiguous block of memory [start..(start+size)[ thus
+  // filling it up with a recognizable non-NULL bit pattern.
+  static void ZapBlock(Address start, size_t size);
 
   // Attempts to allocate the requested (non-zero) number of pages from the
   // OS.  Fewer pages might be allocated than requested. If it fails to
@@ -589,15 +600,14 @@ class MemoryAllocator : public AllStatic {
 // Interface for heap object iterator to be implemented by all object space
 // object iterators.
 //
-// NOTE: The space specific object iterators also implements the own has_next()
-//       and next() methods which are used to avoid using virtual functions
+// NOTE: The space specific object iterators also implements the own next()
+//       method which is used to avoid using virtual functions
 //       iterating a specific space.
 
 class ObjectIterator : public Malloced {
  public:
   virtual ~ObjectIterator() { }
 
-  virtual bool has_next_object() = 0;
   virtual HeapObject* next_object() = 0;
 };
 
@@ -637,11 +647,11 @@ class HeapObjectIterator: public ObjectIterator {
                      Address start,
                      HeapObjectCallback size_func);
 
-  inline bool has_next();
-  inline HeapObject* next();
+  inline HeapObject* next() {
+    return (cur_addr_ < cur_limit_) ? FromCurrentPage() : FromNextPage();
+  }
 
   // implementation of ObjectIterator.
-  virtual bool has_next_object() { return has_next(); }
   virtual HeapObject* next_object() { return next(); }
 
  private:
@@ -651,9 +661,21 @@ class HeapObjectIterator: public ObjectIterator {
   HeapObjectCallback size_func_;  // size function
   Page* end_page_;  // caches the page of the end address
 
-  // Slow path of has_next, checks whether there are more objects in
-  // the next page.
-  bool HasNextInNextPage();
+  HeapObject* FromCurrentPage() {
+    ASSERT(cur_addr_ < cur_limit_);
+
+    HeapObject* obj = HeapObject::FromAddress(cur_addr_);
+    int obj_size = (size_func_ == NULL) ? obj->Size() : size_func_(obj);
+    ASSERT_OBJECT_SIZE(obj_size);
+
+    cur_addr_ += obj_size;
+    ASSERT(cur_addr_ <= cur_limit_);
+
+    return obj;
+  }
+
+  // Slow path of next, goes into the next page.
+  HeapObject* FromNextPage();
 
   // Initializes fields.
   void Initialize(Address start, Address end, HeapObjectCallback size_func);
@@ -887,6 +909,10 @@ class PagedSpace : public Space {
   // collection.
   inline Object* MCAllocateRaw(int size_in_bytes);
 
+  virtual bool ReserveSpace(int bytes);
+
+  // Used by ReserveSpace.
+  virtual void PutRestOfCurrentPageOnFreeList(Page* current_page) = 0;
 
   // ---------------------------------------------------------------------------
   // Mark-compact collection support functions
@@ -970,6 +996,18 @@ class PagedSpace : public Space {
     return Page::FromAllocationTop(alloc_info.limit);
   }
 
+  int CountPagesToTop() {
+    Page* p = Page::FromAllocationTop(allocation_info_.top);
+    PageIterator it(this, PageIterator::ALL_PAGES);
+    int counter = 1;
+    while (it.has_next()) {
+      if (it.next() == p) return counter;
+      counter++;
+    }
+    UNREACHABLE();
+    return -1;
+  }
+
   // Expands the space by allocating a fixed number of pages. Returns false if
   // it cannot allocate requested number of pages from OS. Newly allocated
   // pages are append to the last_page;
@@ -993,6 +1031,9 @@ class PagedSpace : public Space {
   HeapObject* SlowMCAllocateRaw(int size_in_bytes);
 
 #ifdef DEBUG
+  // Returns the number of total pages in this space.
+  int CountTotalPages();
+
   void DoPrintRSet(const char* space_name);
 #endif
  private:
@@ -1001,11 +1042,6 @@ class PagedSpace : public Space {
 
   // Returns a pointer to the page of the relocation pointer.
   Page* MCRelocationTopPage() { return TopPageOf(mc_forwarding_info_); }
-
-#ifdef DEBUG
-  // Returns the number of total pages in this space.
-  int CountTotalPages();
-#endif
 
   friend class PageIterator;
 };
@@ -1117,11 +1153,16 @@ class SemiSpace : public Space {
     return static_cast<int>(addr - low());
   }
 
-  // If we don't have this here then SemiSpace will be abstract.  However
-  // it should never be called.
+  // If we don't have these here then SemiSpace will be abstract.  However
+  // they should never be called.
   virtual int Size() {
     UNREACHABLE();
     return 0;
+  }
+
+  virtual bool ReserveSpace(int bytes) {
+    UNREACHABLE();
+    return false;
   }
 
   bool is_committed() { return committed_; }
@@ -1179,10 +1220,8 @@ class SemiSpaceIterator : public ObjectIterator {
   SemiSpaceIterator(NewSpace* space, HeapObjectCallback size_func);
   SemiSpaceIterator(NewSpace* space, Address start);
 
-  bool has_next() {return current_ < limit_; }
-
   HeapObject* next() {
-    ASSERT(has_next());
+    if (current_ == limit_) return NULL;
 
     HeapObject* object = HeapObject::FromAddress(current_);
     int size = (size_func_ == NULL) ? object->Size() : size_func_(object);
@@ -1192,7 +1231,6 @@ class SemiSpaceIterator : public ObjectIterator {
   }
 
   // Implementation of the ObjectIterator functions.
-  virtual bool has_next_object() { return has_next(); }
   virtual HeapObject* next_object() { return next(); }
 
  private:
@@ -1346,6 +1384,8 @@ class NewSpace : public Space {
 
   bool ToSpaceContains(Address a) { return to_space_.Contains(a); }
   bool FromSpaceContains(Address a) { return from_space_.Contains(a); }
+
+  virtual bool ReserveSpace(int bytes);
 
 #ifdef ENABLE_HEAP_PROTECTION
   // Protect/unprotect the space by marking it read-only/writable.
@@ -1633,6 +1673,8 @@ class OldSpace : public PagedSpace {
   // collection.
   virtual void MCCommitRelocationInfo();
 
+  virtual void PutRestOfCurrentPageOnFreeList(Page* current_page);
+
 #ifdef DEBUG
   // Reports statistics for the space
   void ReportStatistics();
@@ -1694,6 +1736,8 @@ class FixedSpace : public PagedSpace {
   // collection.
   virtual void MCCommitRelocationInfo();
 
+  virtual void PutRestOfCurrentPageOnFreeList(Page* current_page);
+
 #ifdef DEBUG
   // Reports statistic info of the space
   void ReportStatistics();
@@ -1709,6 +1753,10 @@ class FixedSpace : public PagedSpace {
   // Virtual function in the superclass.  Allocate linearly at the start of
   // the page after current_page (there is assumed to be one).
   HeapObject* AllocateInNextPage(Page* current_page, int size_in_bytes);
+
+  void ResetFreeList() {
+    free_list_.Reset();
+  }
 
  private:
   // The size of objects in this space.
@@ -1728,8 +1776,11 @@ class FixedSpace : public PagedSpace {
 class MapSpace : public FixedSpace {
  public:
   // Creates a map space object with a maximum capacity.
-  MapSpace(int max_capacity, AllocationSpace id)
-      : FixedSpace(max_capacity, id, Map::kSize, "map") {}
+  MapSpace(int max_capacity, int max_map_space_pages, AllocationSpace id)
+      : FixedSpace(max_capacity, id, Map::kSize, "map"),
+        max_map_space_pages_(max_map_space_pages) {
+    ASSERT(max_map_space_pages < kMaxMapPageIndex);
+  }
 
   // Prepares for a mark-compact GC.
   virtual void PrepareForMarkCompact(bool will_compact);
@@ -1737,8 +1788,69 @@ class MapSpace : public FixedSpace {
   // Given an index, returns the page address.
   Address PageAddress(int page_index) { return page_addresses_[page_index]; }
 
-  // Constants.
-  static const int kMaxMapPageIndex = (1 << MapWord::kMapPageIndexBits) - 1;
+  static const int kMaxMapPageIndex = 1 << MapWord::kMapPageIndexBits;
+
+  // Are map pointers encodable into map word?
+  bool MapPointersEncodable() {
+    if (!FLAG_use_big_map_space) {
+      ASSERT(CountPagesToTop() <= kMaxMapPageIndex);
+      return true;
+    }
+    return CountPagesToTop() <= max_map_space_pages_;
+  }
+
+  // Should be called after forced sweep to find out if map space needs
+  // compaction.
+  bool NeedsCompaction(int live_maps) {
+    return !MapPointersEncodable() && live_maps <= CompactionThreshold();
+  }
+
+  Address TopAfterCompaction(int live_maps) {
+    ASSERT(NeedsCompaction(live_maps));
+
+    int pages_left = live_maps / kMapsPerPage;
+    PageIterator it(this, PageIterator::ALL_PAGES);
+    while (pages_left-- > 0) {
+      ASSERT(it.has_next());
+      it.next()->ClearRSet();
+    }
+    ASSERT(it.has_next());
+    Page* top_page = it.next();
+    top_page->ClearRSet();
+    ASSERT(top_page->is_valid());
+
+    int offset = live_maps % kMapsPerPage * Map::kSize;
+    Address top = top_page->ObjectAreaStart() + offset;
+    ASSERT(top < top_page->ObjectAreaEnd());
+    ASSERT(Contains(top));
+
+    return top;
+  }
+
+  void FinishCompaction(Address new_top, int live_maps) {
+    Page* top_page = Page::FromAddress(new_top);
+    ASSERT(top_page->is_valid());
+
+    SetAllocationInfo(&allocation_info_, top_page);
+    allocation_info_.top = new_top;
+
+    int new_size = live_maps * Map::kSize;
+    accounting_stats_.DeallocateBytes(accounting_stats_.Size());
+    accounting_stats_.AllocateBytes(new_size);
+
+#ifdef DEBUG
+    if (FLAG_enable_slow_asserts) {
+      intptr_t actual_size = 0;
+      for (Page* p = first_page_; p != top_page; p = p->next_page())
+        actual_size += kMapsPerPage * Map::kSize;
+      actual_size += (new_top - top_page->ObjectAreaStart());
+      ASSERT(accounting_stats_.Size() == actual_size);
+    }
+#endif
+
+    Shrink();
+    ResetFreeList();
+  }
 
  protected:
 #ifdef DEBUG
@@ -1746,8 +1858,17 @@ class MapSpace : public FixedSpace {
 #endif
 
  private:
+  static const int kMapsPerPage = Page::kObjectAreaSize / Map::kSize;
+
+  // Do map space compaction if there is a page gap.
+  int CompactionThreshold() {
+    return kMapsPerPage * (max_map_space_pages_ - 1);
+  }
+
+  const int max_map_space_pages_;
+
   // An array of page start address in a map space.
-  Address page_addresses_[kMaxMapPageIndex + 1];
+  Address page_addresses_[kMaxMapPageIndex];
 
  public:
   TRACK_MEMORY("MapSpace")
@@ -1890,6 +2011,11 @@ class LargeObjectSpace : public Space {
   // Checks whether the space is empty.
   bool IsEmpty() { return first_chunk_ == NULL; }
 
+  // See the comments for ReserveSpace in the Space class.  This has to be
+  // called after ReserveSpace has been called on the paged spaces, since they
+  // may use some memory, leaving less for large objects.
+  virtual bool ReserveSpace(int bytes);
+
 #ifdef ENABLE_HEAP_PROTECTION
   // Protect/unprotect the space by marking it read-only/writable.
   void Protect();
@@ -1937,11 +2063,9 @@ class LargeObjectIterator: public ObjectIterator {
   explicit LargeObjectIterator(LargeObjectSpace* space);
   LargeObjectIterator(LargeObjectSpace* space, HeapObjectCallback size_func);
 
-  bool has_next() { return current_ != NULL; }
   HeapObject* next();
 
   // implementation of ObjectIterator.
-  virtual bool has_next_object() { return has_next(); }
   virtual HeapObject* next_object() { return next(); }
 
  private:

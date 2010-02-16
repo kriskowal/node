@@ -398,7 +398,6 @@ class ExternalReference BASE_EMBEDDED {
   // ExternalReferenceTable in serialize.cc manually.
 
   static ExternalReference perform_gc_function();
-  static ExternalReference builtin_passed_function();
   static ExternalReference random_positive_smi_function();
 
   // Static data in the keyed lookup cache.
@@ -419,6 +418,11 @@ class ExternalReference BASE_EMBEDDED {
 
   // Static variable RegExpStack::limit_address()
   static ExternalReference address_of_regexp_stack_limit();
+
+  // Static variables for RegExp.
+  static ExternalReference address_of_static_offsets_vector();
+  static ExternalReference address_of_regexp_stack_memory_address();
+  static ExternalReference address_of_regexp_stack_memory_size();
 
   // Static variable Heap::NewSpaceStart()
   static ExternalReference new_space_start();
@@ -458,6 +462,10 @@ class ExternalReference BASE_EMBEDDED {
 
   // Function NativeRegExpMacroAssembler::GrowStack()
   static ExternalReference re_grow_stack();
+
+  // byte NativeRegExpMacroAssembler::word_character_bitmap
+  static ExternalReference re_word_character_map();
+
 #endif
 
   // This lets you register a function that rewrites all external references.

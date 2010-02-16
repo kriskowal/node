@@ -55,7 +55,7 @@
 //   CodeGenerator
 //   ~CodeGenerator
 //   ProcessDeferred
-//   GenCode
+//   Generate
 //   ComputeLazyCompile
 //   BuildBoilerplate
 //   ComputeCallInitialize
@@ -181,43 +181,6 @@ class DeferredCode: public ZoneObject {
   DISALLOW_COPY_AND_ASSIGN(DeferredCode);
 };
 
-
-// RuntimeStub models code stubs calling entry points in the Runtime class.
-class RuntimeStub : public CodeStub {
- public:
-  explicit RuntimeStub(Runtime::FunctionId id, int num_arguments)
-      : id_(id), num_arguments_(num_arguments) { }
-
-  void Generate(MacroAssembler* masm);
-
-  // Disassembler support.  It is useful to be able to print the name
-  // of the runtime function called through this stub.
-  static const char* GetNameFromMinorKey(int minor_key) {
-    return Runtime::FunctionForId(IdField::decode(minor_key))->stub_name;
-  }
-
- private:
-  Runtime::FunctionId id_;
-  int num_arguments_;
-
-  class ArgumentField: public BitField<int,  0, 16> {};
-  class IdField: public BitField<Runtime::FunctionId, 16, kMinorBits - 16> {};
-
-  Major MajorKey() { return Runtime; }
-  int MinorKey() {
-    return IdField::encode(id_) | ArgumentField::encode(num_arguments_);
-  }
-
-  const char* GetName();
-
-#ifdef DEBUG
-  void Print() {
-    PrintF("RuntimeStub (id %s)\n", Runtime::FunctionForId(id_)->name);
-  }
-#endif
-};
-
-
 class StackCheckStub : public CodeStub {
  public:
   StackCheckStub() { }
@@ -294,30 +257,53 @@ class InstanceofStub: public CodeStub {
 };
 
 
-class UnarySubStub : public CodeStub {
+class GenericUnaryOpStub : public CodeStub {
  public:
-  explicit UnarySubStub(bool overwrite)
-      : overwrite_(overwrite) { }
+  GenericUnaryOpStub(Token::Value op, bool overwrite)
+      : op_(op), overwrite_(overwrite) { }
 
  private:
+  Token::Value op_;
   bool overwrite_;
-  Major MajorKey() { return UnarySub; }
-  int MinorKey() { return overwrite_ ? 1 : 0; }
+
+  class OverwriteField: public BitField<int, 0, 1> {};
+  class OpField: public BitField<Token::Value, 1, kMinorBits - 1> {};
+
+  Major MajorKey() { return GenericUnaryOp; }
+  int MinorKey() {
+    return OpField::encode(op_) | OverwriteField::encode(overwrite_);
+  }
+
   void Generate(MacroAssembler* masm);
 
-  const char* GetName() { return "UnarySubStub"; }
+  const char* GetName();
+};
+
+
+enum NaNInformation {
+  kBothCouldBeNaN,
+  kCantBothBeNaN
 };
 
 
 class CompareStub: public CodeStub {
  public:
-  CompareStub(Condition cc, bool strict) : cc_(cc), strict_(strict) { }
+  CompareStub(Condition cc,
+              bool strict,
+              NaNInformation nan_info = kBothCouldBeNaN) :
+      cc_(cc), strict_(strict), never_nan_nan_(nan_info == kCantBothBeNaN) { }
 
   void Generate(MacroAssembler* masm);
 
  private:
   Condition cc_;
   bool strict_;
+  // Only used for 'equal' comparisons.  Tells the stub that we already know
+  // that at least one side of the comparison is not NaN.  This allows the
+  // stub to use object identity in the positive case.  We ignore it when
+  // generating the minor key for other comparisons to avoid creating more
+  // stubs.
+  bool never_nan_nan_;
 
   Major MajorKey() { return Compare; }
 
@@ -329,6 +315,9 @@ class CompareStub: public CodeStub {
                          Register object,
                          Register scratch);
 
+  // Unfortunately you have to run without snapshots to see most of these
+  // names in the profile since most compare stubs end up in the snapshot.
+  const char* GetName();
 #ifdef DEBUG
   void Print() {
     PrintF("CompareStub (cc %d), (strict %s)\n",
@@ -341,25 +330,30 @@ class CompareStub: public CodeStub {
 
 class CEntryStub : public CodeStub {
  public:
-  explicit CEntryStub(int result_size) : result_size_(result_size) { }
+  explicit CEntryStub(int result_size,
+                      ExitFrame::Mode mode = ExitFrame::MODE_NORMAL)
+      : result_size_(result_size), mode_(mode) { }
 
-  void Generate(MacroAssembler* masm) { GenerateBody(masm, false); }
+  void Generate(MacroAssembler* masm);
 
- protected:
-  void GenerateBody(MacroAssembler* masm, bool is_debug_break);
+ private:
   void GenerateCore(MacroAssembler* masm,
                     Label* throw_normal_exception,
                     Label* throw_termination_exception,
                     Label* throw_out_of_memory_exception,
-                    ExitFrame::Mode mode,
                     bool do_gc,
                     bool always_allocate_scope);
   void GenerateThrowTOS(MacroAssembler* masm);
   void GenerateThrowUncatchable(MacroAssembler* masm,
                                 UncatchableExceptionType type);
- private:
+
   // Number of pointers/values returned.
-  int result_size_;
+  const int result_size_;
+  const ExitFrame::Mode mode_;
+
+  // Minor key encoding
+  class ExitFrameModeBits: public BitField<ExitFrame::Mode, 0, 1> {};
+  class IndirectResultBits: public BitField<bool, 1, 1> {};
 
   Major MajorKey() { return CEntry; }
   // Minor key must differ if different result_size_ values means different
@@ -396,16 +390,18 @@ class ApiGetterEntryStub : public CodeStub {
 };
 
 
-class CEntryDebugBreakStub : public CEntryStub {
+// Mark the debugger statement to be recognized by debugger (by the MajorKey)
+class DebuggerStatementStub : public CodeStub {
  public:
-  CEntryDebugBreakStub() : CEntryStub(1) { }
+  DebuggerStatementStub() { }
 
-  void Generate(MacroAssembler* masm) { GenerateBody(masm, true); }
+  void Generate(MacroAssembler* masm);
 
  private:
-  int MinorKey() { return 1; }
+  Major MajorKey() { return DebuggerStatement; }
+  int MinorKey() { return 0; }
 
-  const char* GetName() { return "CEntryDebugBreakStub"; }
+  const char* GetName() { return "DebuggerStatementStub"; }
 };
 
 
@@ -467,6 +463,84 @@ class ArgumentsAccessStub: public CodeStub {
     PrintF("ArgumentsAccessStub (type %d)\n", type_);
   }
 #endif
+};
+
+
+class RegExpExecStub: public CodeStub {
+ public:
+  RegExpExecStub() { }
+
+ private:
+  Major MajorKey() { return RegExpExec; }
+  int MinorKey() { return 0; }
+
+  void Generate(MacroAssembler* masm);
+
+  const char* GetName() { return "RegExpExecStub"; }
+
+#ifdef DEBUG
+  void Print() {
+    PrintF("RegExpExecStub\n");
+  }
+#endif
+};
+
+
+class CallFunctionStub: public CodeStub {
+ public:
+  CallFunctionStub(int argc, InLoopFlag in_loop, CallFunctionFlags flags)
+      : argc_(argc), in_loop_(in_loop), flags_(flags) { }
+
+  void Generate(MacroAssembler* masm);
+
+ private:
+  int argc_;
+  InLoopFlag in_loop_;
+  CallFunctionFlags flags_;
+
+#ifdef DEBUG
+  void Print() {
+    PrintF("CallFunctionStub (args %d, in_loop %d, flags %d)\n",
+           argc_,
+           static_cast<int>(in_loop_),
+           static_cast<int>(flags_));
+  }
+#endif
+
+  // Minor key encoding in 31 bits AAAAAAAAAAAAAAAAAAAAAFI A(rgs)F(lag)I(nloop).
+  class InLoopBits: public BitField<InLoopFlag, 0, 1> {};
+  class FlagBits: public BitField<CallFunctionFlags, 1, 1> {};
+  class ArgcBits: public BitField<int, 2, 29> {};
+
+  Major MajorKey() { return CallFunction; }
+  int MinorKey() {
+    // Encode the parameters in a unique 31 bit value.
+    return InLoopBits::encode(in_loop_)
+           | FlagBits::encode(flags_)
+           | ArgcBits::encode(argc_);
+  }
+
+  InLoopFlag InLoop() { return in_loop_; }
+  bool ReceiverMightBeValue() {
+    return (flags_ & RECEIVER_MIGHT_BE_VALUE) != 0;
+  }
+
+ public:
+  static int ExtractArgcFromMinorKey(int minor_key) {
+    return ArgcBits::decode(minor_key);
+  }
+};
+
+
+class ToBooleanStub: public CodeStub {
+ public:
+  ToBooleanStub() { }
+
+  void Generate(MacroAssembler* masm);
+
+ private:
+  Major MajorKey() { return ToBoolean; }
+  int MinorKey() { return 0; }
 };
 
 

@@ -199,9 +199,7 @@
       'conditions': [
         # The ARM assembler assumes the host is 32 bits, so force building
         # 32-bit host tools.
-        # TODO(piman): This assumes that the host is ia32 or amd64. Fixing the
-        # code would be better
-        ['target_arch=="arm" and _toolset=="host"', {
+        ['target_arch=="arm" and host_arch=="x64" and _toolset=="host"', {
           'cflags': ['-m32'],
           'ldflags': ['-m32'],
         }]
@@ -254,6 +252,8 @@
         '../../src/counters.cc',
         '../../src/counters.h',
         '../../src/cpu.h',
+	'../../src/data-flow.cc',
+	'../../src/data-flow.h',
         '../../src/dateparser.cc',
         '../../src/dateparser.h',
         '../../src/dateparser-inl.h',
@@ -279,6 +279,8 @@
         '../../src/frames-inl.h',
         '../../src/frames.cc',
         '../../src/frames.h',
+        '../../src/full-codegen.cc',
+        '../../src/full-codegen.h',
         '../../src/func-name-inferrer.cc',
         '../../src/func-name-inferrer.h',
         '../../src/global-handles.cc',
@@ -413,6 +415,7 @@
             '../../src/arm/fast-codegen-arm.cc',
             '../../src/arm/frames-arm.cc',
             '../../src/arm/frames-arm.h',
+            '../../src/arm/full-codegen-arm.cc',
             '../../src/arm/ic-arm.cc',
             '../../src/arm/jump-target-arm.cc',
             '../../src/arm/macro-assembler-arm.cc',
@@ -428,9 +431,7 @@
           'conditions': [
             # The ARM assembler assumes the host is 32 bits, so force building
             # 32-bit host tools.
-            # TODO(piman): This assumes that the host is ia32 or amd64. Fixing
-            # the code would be better
-            ['_toolset=="host"', {
+            ['host_arch=="x64" and _toolset=="host"', {
               'cflags': ['-m32'],
               'ldflags': ['-m32'],
             }]
@@ -453,6 +454,7 @@
             '../../src/ia32/fast-codegen-ia32.cc',
             '../../src/ia32/frames-ia32.cc',
             '../../src/ia32/frames-ia32.h',
+            '../../src/ia32/full-codegen-ia32.cc',
             '../../src/ia32/ic-ia32.cc',
             '../../src/ia32/jump-target-ia32.cc',
             '../../src/ia32/macro-assembler-ia32.cc',
@@ -482,6 +484,7 @@
             '../../src/x64/fast-codegen-x64.cc',
             '../../src/x64/frames-x64.cc',
             '../../src/x64/frames-x64.h',
+            '../../src/x64/full-codegen-x64.cc',
             '../../src/x64/ic-x64.cc',
             '../../src/x64/jump-target-x64.cc',
             '../../src/x64/macro-assembler-x64.cc',
@@ -598,9 +601,7 @@
       'conditions': [
         # The ARM assembler assumes the host is 32 bits, so force building
         # 32-bit host tools.
-        # TODO(piman): This assumes that the host is ia32 or amd64. Fixing
-        # the code would be better
-        ['target_arch=="arm" and _toolset=="host"', {
+        ['target_arch=="arm" and host_arch=="x64" and _toolset=="host"', {
           'cflags': ['-m32'],
           'ldflags': ['-m32'],
         }]

@@ -176,7 +176,7 @@ StackFrame* StackFrameIterator::SingletonFor(StackFrame::Type type) {
 
 
 StackTraceFrameIterator::StackTraceFrameIterator() {
-  if (!done() && !frame()->function()->IsJSFunction()) Advance();
+  if (!done() && !IsValidFrame()) Advance();
 }
 
 
@@ -184,8 +184,16 @@ void StackTraceFrameIterator::Advance() {
   while (true) {
     JavaScriptFrameIterator::Advance();
     if (done()) return;
-    if (frame()->function()->IsJSFunction()) return;
+    if (IsValidFrame()) return;
   }
+}
+
+bool StackTraceFrameIterator::IsValidFrame() {
+    if (!frame()->function()->IsJSFunction()) return false;
+    Object* script = JSFunction::cast(frame()->function())->shared()->script();
+    // Don't show functions from native scripts to user.
+    return (script->IsScript() &&
+            Script::TYPE_NATIVE != Script::cast(script)->type()->value());
 }
 
 
@@ -306,7 +314,7 @@ void StackHandler::Cook(Code* code) {
 
 
 void StackHandler::Uncook(Code* code) {
-  ASSERT(MarkCompactCollector::IsCompacting());
+  ASSERT(MarkCompactCollector::HasCompacted());
   set_pc(code->instruction_start() + OffsetFrom(pc()));
   ASSERT(code->contains(pc()));
 }
@@ -336,7 +344,7 @@ void StackFrame::CookFramesForThread(ThreadLocalTop* thread) {
 void StackFrame::UncookFramesForThread(ThreadLocalTop* thread) {
   // Only uncooking frames when the collector is compacting and thus moving code
   // around.
-  ASSERT(MarkCompactCollector::IsCompacting());
+  ASSERT(MarkCompactCollector::HasCompacted());
   ASSERT(thread->stack_is_cooked());
   for (StackFrameIterator it(thread); !it.done(); it.Advance()) {
     it.frame()->Uncook();
@@ -402,7 +410,7 @@ Object*& ExitFrame::code_slot() const {
 Code* ExitFrame::code() const {
   Object* code = code_slot();
   if (code->IsSmi()) {
-    return Heap::c_entry_debug_break_code();
+    return Heap::debugger_statement_code();
   } else {
     return Code::cast(code);
   }

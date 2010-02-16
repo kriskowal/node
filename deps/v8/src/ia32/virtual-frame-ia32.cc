@@ -513,13 +513,33 @@ void VirtualFrame::AllocateStackSlots() {
     Handle<Object> undefined = Factory::undefined_value();
     FrameElement initial_value =
         FrameElement::ConstantElement(undefined, FrameElement::SYNCED);
-    Result temp = cgen()->allocator()->Allocate();
-    ASSERT(temp.is_valid());
-    __ Set(temp.reg(), Immediate(undefined));
+    if (count == 1) {
+      __ push(Immediate(undefined));
+    } else if (count < kLocalVarBound) {
+      // For less locals the unrolled loop is more compact.
+      Result temp = cgen()->allocator()->Allocate();
+      ASSERT(temp.is_valid());
+      __ Set(temp.reg(), Immediate(undefined));
+      for (int i = 0; i < count; i++) {
+        __ push(temp.reg());
+      }
+    } else {
+      // For more locals a loop in generated code is more compact.
+      Label alloc_locals_loop;
+      Result cnt = cgen()->allocator()->Allocate();
+      Result tmp = cgen()->allocator()->Allocate();
+      ASSERT(cnt.is_valid());
+      ASSERT(tmp.is_valid());
+      __ mov(cnt.reg(), Immediate(count));
+      __ mov(tmp.reg(), Immediate(undefined));
+      __ bind(&alloc_locals_loop);
+      __ push(tmp.reg());
+      __ dec(cnt.reg());
+      __ j(not_zero, &alloc_locals_loop);
+    }
     for (int i = 0; i < count; i++) {
       elements_.Add(initial_value);
       stack_pointer_++;
-      __ push(temp.reg());
     }
   }
 }
@@ -879,31 +899,45 @@ Result VirtualFrame::CallKeyedLoadIC(RelocInfo::Mode mode) {
 
 Result VirtualFrame::CallStoreIC() {
   // Name, value, and receiver are on top of the frame.  The IC
-  // expects name in ecx, value in eax, and receiver on the stack.  It
-  // does not drop the receiver.
+  // expects name in ecx, value in eax, and receiver in edx.
   Handle<Code> ic(Builtins::builtin(Builtins::StoreIC_Initialize));
   Result name = Pop();
   Result value = Pop();
-  PrepareForCall(1, 0);  // One stack arg, not callee-dropped.
+  Result receiver = Pop();
+  PrepareForCall(0, 0);
 
-  if (value.is_register() && value.reg().is(ecx)) {
-    if (name.is_register() && name.reg().is(eax)) {
-      // Wrong registers.
-      __ xchg(eax, ecx);
-    } else {
-      // Register eax is free for value, which frees ecx for name.
-      value.ToRegister(eax);
+  // Optimized for case in which name is a constant value.
+  if (name.is_register() && (name.reg().is(edx) || name.reg().is(eax))) {
+    if (!is_used(ecx)) {
       name.ToRegister(ecx);
+    } else if (!is_used(ebx)) {
+      name.ToRegister(ebx);
+    } else {
+      ASSERT(!is_used(edi));  // Only three results are live, so edi is free.
+      name.ToRegister(edi);
+    }
+  }
+  // Now name is not in edx or eax, so we can fix them, then move name to ecx.
+  if (value.is_register() && value.reg().is(edx)) {
+    if (receiver.is_register() && receiver.reg().is(eax)) {
+      // Wrong registers.
+      __ xchg(eax, edx);
+    } else {
+      // Register eax is free for value, which frees edx for receiver.
+      value.ToRegister(eax);
+      receiver.ToRegister(edx);
     }
   } else {
-    // Register ecx is free for name, which guarantees eax is free for
+    // Register edx is free for receiver, which guarantees eax is free for
     // value.
-    name.ToRegister(ecx);
+    receiver.ToRegister(edx);
     value.ToRegister(eax);
   }
-
+  // Receiver and value are in the right place, so ecx is free for name.
+  name.ToRegister(ecx);
   name.Unuse();
   value.Unuse();
+  receiver.Unuse();
   return RawCallCodeObject(ic, RelocInfo::CODE_TARGET);
 }
 

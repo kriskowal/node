@@ -33,9 +33,12 @@
 namespace v8 {
 namespace internal {
 
+// Convenience for platform-independent signatures.  We do not normally
+// distinguish memory operands from other operands on ia32.
+typedef Operand MemOperand;
+
 // Forward declaration.
 class JumpTarget;
-
 
 // MacroAssembler implements a collection of frequently used macros.
 class MacroAssembler: public Assembler {
@@ -138,9 +141,27 @@ class MacroAssembler: public Assembler {
   // Compare instance type for map.
   void CmpInstanceType(Register map, InstanceType type);
 
+  // Check if the object in register heap_object is a string. Afterwards the
+  // register map contains the object map and the register instance_type
+  // contains the instance_type. The registers map and instance_type can be the
+  // same in which case it contains the instance type afterwards. Either of the
+  // registers map and instance_type can be the same as heap_object.
+  Condition IsObjectStringType(Register heap_object,
+                               Register map,
+                               Register instance_type);
+
   // FCmp is similar to integer cmp, but requires unsigned
   // jcc instructions (je, ja, jae, jb, jbe, je, and jz).
   void FCmp();
+
+  // Smi tagging support.
+  void SmiTag(Register reg) {
+    ASSERT(kSmiTag == 0);
+    shl(reg, kSmiTagSize);
+  }
+  void SmiUntag(Register reg) {
+    sar(reg, kSmiTagSize);
+  }
 
   // ---------------------------------------------------------------------------
   // Exception handling
@@ -310,7 +331,7 @@ class MacroAssembler: public Assembler {
   // Eventually this should be used for all C calls.
   void CallRuntime(Runtime::Function* f, int num_arguments);
 
-  // Call a runtime function, returning the RuntimeStub object called.
+  // Call a runtime function, returning the CodeStub object called.
   // Try to generate the stub code if necessary.  Do not perform a GC
   // but instead return a retry after GC failure.
   Object* TryCallRuntime(Runtime::Function* f, int num_arguments);
@@ -347,6 +368,8 @@ class MacroAssembler: public Assembler {
 
   void Ret();
 
+  // Emit code to discard a non-negative number of pointer-sized elements
+  // from the stack, clobbering only the esp register.
   void Drop(int element_count);
 
   void Call(Label* target) { call(target); }
@@ -369,6 +392,8 @@ class MacroAssembler: public Assembler {
   void SetCounter(StatsCounter* counter, int value);
   void IncrementCounter(StatsCounter* counter, int value);
   void DecrementCounter(StatsCounter* counter, int value);
+  void IncrementCounter(Condition cc, StatsCounter* counter, int value);
+  void DecrementCounter(Condition cc, StatsCounter* counter, int value);
 
 
   // ---------------------------------------------------------------------------
@@ -389,6 +414,17 @@ class MacroAssembler: public Assembler {
   bool generating_stub() { return generating_stub_; }
   void set_allow_stub_calls(bool value) { allow_stub_calls_ = value; }
   bool allow_stub_calls() { return allow_stub_calls_; }
+
+  // ---------------------------------------------------------------------------
+  // String utilities.
+
+  // Checks if both objects are sequential ASCII strings, and jumps to label
+  // if either is not.
+  void JumpIfNotBothSequentialAsciiStrings(Register object1,
+                                           Register object2,
+                                           Register scratch1,
+                                           Register scratch2,
+                                           Label *on_not_flat_ascii_strings);
 
  private:
   List<Unresolved> unresolved_;

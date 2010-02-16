@@ -37,6 +37,8 @@ namespace internal {
   V(CallFunction)                        \
   V(GenericBinaryOp)                     \
   V(StringAdd)                           \
+  V(SubString)                           \
+  V(StringCompare)                       \
   V(SmiOp)                               \
   V(Compare)                             \
   V(RecordWrite)                         \
@@ -46,15 +48,16 @@ namespace internal {
   V(FastNewClosure)                      \
   V(FastNewContext)                      \
   V(FastCloneShallowArray)               \
-  V(UnarySub)                            \
+  V(GenericUnaryOp)                      \
   V(RevertToNumber)                      \
   V(ToBoolean)                           \
   V(Instanceof)                          \
   V(CounterOp)                           \
   V(ArgumentsAccess)                     \
-  V(Runtime)                             \
+  V(RegExpExec)                          \
   V(CEntry)                              \
-  V(JSEntry)
+  V(JSEntry)                             \
+  V(DebuggerStatement)
 
 // List of code stubs only used on ARM platforms.
 #ifdef V8_TARGET_ARCH_ARM

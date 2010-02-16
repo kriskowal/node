@@ -3,10 +3,11 @@ process.mixin(require("./common"));
 debug("load test-module-loading.js");
 
 var a = require("./fixtures/a");
+var c = require("./fixtures/b/c");
 var d = require("./fixtures/b/d");
 var d2 = require("./fixtures/b/d");
 // Absolute
-var d3 = require(require('path').dirname(__filename)+"/fixtures/b/d");
+var d3 = require(__dirname+"/fixtures/b/d");
 // Relative
 var d4 = require("../mjsunit/fixtures/b/d");
 
@@ -33,6 +34,8 @@ assert.equal("D", d3.D());
 assert.equal(true, d4.D instanceof Function);
 assert.equal("D", d4.D());
 
+assert.ok((new a.SomeClass) instanceof c.SomeClass);
+
 debug("test index.js modules ids and relative loading")
 var one = require("./fixtures/nested-index/one"),
   two = require("./fixtures/nested-index/two");
@@ -51,6 +54,16 @@ try {
   errorThrown = true;
   assert.equal("blah", e.message);
 }
+
+assert.equal(require('path').dirname(__filename), __dirname);
+
+require.async('./fixtures/a')
+  .addCallback(function(a) {
+    assert.equal("A", a.A());
+  })
+  .addErrback(function() {
+    assert.ok(false, 'async loading broken?');
+  });
 
 process.addListener("exit", function () {
   assert.equal(true, a.A instanceof Function);

@@ -1,4 +1,80 @@
-2010.01.09, Version 0.1.25
+2010.02.09, Version 0.1.28
+
+  * Use Google's jsmin.py which can be used for evil.
+
+  * Add posix.truncate()
+
+  * Throw errors from server.listen()
+
+  * stdio bugfix (test by Mikeal Rogers)
+
+  * Module system refactor (Felix Geisendörfer, Blaine Cook)
+
+  * Add process.setuid(), getuid() (Michael Carter)
+
+  * sys.inspect refactor (Tim Caswell)
+
+  * Multipart library rewrite (isaacs)
+
+
+2010.02.03, Version 0.1.27, 0cfa789cc530848725a8cb5595224e78ae7b9dd0
+
+  * Implemented __dirname (Felix Geisendörfer)
+
+  * Downcase process.ARGV, process.ENV, GLOBAL
+    (now process.argv, process.env, global)
+
+  * Bug Fix: Late promise promise callbacks firing
+    (Felix Geisendörfer, Jonas Pfenniger)
+
+  * Make assert.AssertionError instance of Error
+
+  * Removed inline require call for querystring
+    (self@cloudhead.net)
+
+  * Add support for MX, TXT, and SRV records in DNS module.
+    (Blaine Cook)
+
+  * Bugfix: HTTP client automatically reconnecting
+
+  * Adding OS X .dmg build scripts. (Standa Opichal)
+
+  * Bugfix: ObjectWrap memory leak
+
+  * Bugfix: Multipart handle Content-Type headers with charset
+    (Felix Geisendörfer)
+
+  * Upgrade http-parser to fix header overflow attack.
+
+  * Upgrade V8 to 2.1.0
+
+  * Various other bug fixes, performance improvements.
+
+
+2010.01.20, Version 0.1.26, da00413196e432247346d9e587f8c78ce5ceb087
+
+  * Bugfix, HTTP eof causing crash (Ben Williamson)
+
+  * Better error message on SyntaxError
+
+  * API: Move Promise and EventEmitter into 'events' module
+
+  * API: Add process.nextTick()
+
+  * Allow optional params to setTimeout, setInterval
+    (Micheil Smith)
+
+  * API: change some Promise behavior (Felix Geisendörfer)
+    - Removed Promise.cancel()
+    - Support late callback binding
+    - Make unhandled Promise errors throw an exception
+
+  * Upgrade V8 to 2.0.6.1
+
+  * Solaris port (Erich Ocean)
+
+
+2010.01.09, Version 0.1.25, 39ca93549af91575ca9d4cbafd1e170fbcef3dfa
 
   * sys.inspect() improvements (Tim Caswell)
 

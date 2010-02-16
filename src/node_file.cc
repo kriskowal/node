@@ -37,47 +37,52 @@ static int After(eio_req *req) {
   ev_unref(EV_DEFAULT_UC);
 
   int argc = 0;
-  Local<Value> argv[5];  // 5 is the maximum number of args
+  Local<Value> argv[6];  // 6 is the maximum number of args
 
   if (req->errorno != 0) {
     argc = 1;
     argv[0] = errno_exception(req->errorno);
   } else {
+    // Note: the error is always given the first argument of the callback.
+    // If there is no error then then the first argument is null.
+    argv[0] = Local<Value>::New(Null());
+
     switch (req->type) {
       case EIO_CLOSE:
       case EIO_RENAME:
       case EIO_UNLINK:
       case EIO_RMDIR:
       case EIO_MKDIR:
+      case EIO_FTRUNCATE:
         argc = 0;
         break;
 
       case EIO_OPEN:
       case EIO_SENDFILE:
-        argc = 1;
-        argv[0] = Integer::New(req->result);
+        argc = 2;
+        argv[1] = Integer::New(req->result);
         break;
 
       case EIO_WRITE:
-        argc = 1;
-        argv[0] = Integer::New(req->result);
+        argc = 2;
+        argv[1] = Integer::New(req->result);
         break;
 
       case EIO_STAT:
       {
         struct stat *s = reinterpret_cast<struct stat*>(req->ptr2);
-        argc = 1;
-        argv[0] = BuildStatsObject(s);
+        argc = 2;
+        argv[1] = BuildStatsObject(s);
         break;
       }
 
       case EIO_READ:
       {
-        argc = 2;
+        argc = 3;
         Local<Object> obj = Local<Object>::New(*callback);
         Local<Value> enc_val = obj->GetHiddenValue(encoding_symbol);
-        argv[0] = Encode(req->ptr2, req->result, ParseEncoding(enc_val));
-        argv[1] = Integer::New(req->result);
+        argv[1] = Encode(req->ptr2, req->result, ParseEncoding(enc_val));
+        argv[2] = Integer::New(req->result);
         break;
       }
 
@@ -100,8 +105,8 @@ static int After(eio_req *req) {
 #endif
         }
 
-        argc = 1;
-        argv[0] = names;
+        argc = 2;
+        argv[1] = names;
         break;
       }
 
@@ -193,6 +198,25 @@ static Handle<Value> Rename(const Arguments& args) {
     ASYNC_CALL(rename, args[2], *old_path, *new_path)
   } else {
     int ret = rename(*old_path, *new_path);
+    if (ret != 0) return ThrowException(errno_exception(errno));
+    return Undefined();
+  }
+}
+
+static Handle<Value> Truncate(const Arguments& args) {
+  HandleScope scope;
+
+  if (args.Length() < 2 || !args[0]->IsInt32()) {
+    return THROW_BAD_ARGS;
+  }
+
+  int fd = args[0]->Int32Value();
+  off_t len = args[1]->Uint32Value();
+
+  if (args[2]->IsFunction()) {
+    ASYNC_CALL(ftruncate, args[2], fd, len)
+  } else {
+    int ret = ftruncate(fd, len);
     if (ret != 0) return ThrowException(errno_exception(errno));
     return Undefined();
   }
@@ -397,7 +421,10 @@ static Handle<Value> Read(const Arguments& args) {
       ret = pread(fd, buf, MIN(len, READ_BUF_LEN), offset);
     }
     if (ret < 0) return ThrowException(errno_exception(errno));
-    return scope.Close(Integer::New(ret));
+    Local<Array> a = Array::New(2);
+    a->Set(Integer::New(0), Encode(buf, ret, encoding));
+    a->Set(Integer::New(1), Integer::New(ret));
+    return scope.Close(a);
   }
 }
 
@@ -408,6 +435,7 @@ void File::Initialize(Handle<Object> target) {
   NODE_SET_METHOD(target, "open", Open);
   NODE_SET_METHOD(target, "read", Read);
   NODE_SET_METHOD(target, "rename", Rename);
+  NODE_SET_METHOD(target, "truncate", Truncate);
   NODE_SET_METHOD(target, "rmdir", RMDir);
   NODE_SET_METHOD(target, "mkdir", MKDir);
   NODE_SET_METHOD(target, "sendfile", SendFile);

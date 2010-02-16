@@ -180,6 +180,9 @@ class VirtualFrame : public ZoneObject {
   // shared return site.  Emits code for spills.
   void PrepareForReturn();
 
+  // Number of local variables after when we use a loop for allocating.
+  static const int kLocalVarBound = 5;
+
   // Allocate and initialize the frame-allocated locals.
   void AllocateStackSlots();
 
@@ -284,17 +287,10 @@ class VirtualFrame : public ZoneObject {
   // Call stub given the number of arguments it expects on (and
   // removes from) the stack.
   void CallStub(CodeStub* stub, int arg_count) {
-    PrepareForCall(arg_count, arg_count);
-    RawCallStub(stub);
+    Forget(arg_count);
+    ASSERT(cgen()->HasValidEntryRegisters());
+    masm()->CallStub(stub);
   }
-
-  // Call stub that expects its argument in r0.  The argument is given
-  // as a result which must be the register r0.
-  void CallStub(CodeStub* stub, Result* arg);
-
-  // Call stub that expects its arguments in r1 and r0.  The arguments
-  // are given as results which must be the appropriate registers.
-  void CallStub(CodeStub* stub, Result* arg0, Result* arg1);
 
   // Call runtime given the number of arguments expected on (and
   // removed from) the stack.
@@ -308,19 +304,10 @@ class VirtualFrame : public ZoneObject {
                      int arg_count);
 
   // Call into an IC stub given the number of arguments it removes
-  // from the stack.  Register arguments are passed as results and
-  // consumed by the call.
+  // from the stack.  Register arguments to the IC stub are implicit,
+  // and depend on the type of IC stub.
   void CallCodeObject(Handle<Code> ic,
                       RelocInfo::Mode rmode,
-                      int dropped_args);
-  void CallCodeObject(Handle<Code> ic,
-                      RelocInfo::Mode rmode,
-                      Result* arg,
-                      int dropped_args);
-  void CallCodeObject(Handle<Code> ic,
-                      RelocInfo::Mode rmode,
-                      Result* arg0,
-                      Result* arg1,
                       int dropped_args);
 
   // Drop a number of elements from the top of the expression stack.  May
@@ -345,6 +332,11 @@ class VirtualFrame : public ZoneObject {
   // Push an element on top of the expression stack and emit a
   // corresponding push instruction.
   void EmitPush(Register reg);
+
+  // Push multiple registers on the stack and the virtual frame
+  // Register are selected by setting bit in src_regs and
+  // are pushed in decreasing order: r15 .. r0.
+  void EmitPushMultiple(int count, int src_regs);
 
   // Push an element on the virtual frame.
   void Push(Register reg);
@@ -502,14 +494,6 @@ class VirtualFrame : public ZoneObject {
   // is returned.  Otherwise, returns kIllegalIndex.
   // Register counts are correctly updated.
   int InvalidateFrameSlotAt(int index);
-
-  // Call a code stub that has already been prepared for calling (via
-  // PrepareForCall).
-  void RawCallStub(CodeStub* stub);
-
-  // Calls a code object which has already been prepared for calling
-  // (via PrepareForCall).
-  void RawCallCodeObject(Handle<Code> code, RelocInfo::Mode rmode);
 
   bool Equals(VirtualFrame* other);
 
