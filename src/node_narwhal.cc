@@ -912,6 +912,7 @@ static Local<Object> Load(int argc, char *argv[]) {
   NODE_SET_METHOD(process, "loop", Loop);
   NODE_SET_METHOD(process, "unloop", Unloop);
   NODE_SET_METHOD(process, "compile", Compile);
+  NODE_SET_METHOD(module_system, "compile", Compile);
   NODE_SET_METHOD(process, "_byteLength", ByteLength);
   NODE_SET_METHOD(process, "reallyExit", Exit);
   NODE_SET_METHOD(process, "chdir", Chdir);
