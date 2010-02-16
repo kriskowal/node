@@ -264,7 +264,7 @@ var eventsModule = createInternalModule('events', function (exports) {
 
   exports.Promise.prototype.addCallback = function (listener) {
     if (this.hasFired === 'success') {
-      return listener.apply(this, this._values);
+      listener.apply(this, this._values);
     }
 
     return this.addListener("success", listener);
@@ -296,6 +296,18 @@ var eventsModule = createInternalModule('events', function (exports) {
     var self = this;
     var ret;
     var hadError = false;
+
+    if (this.hasFired) {
+      ret = (this._values.length == 1)
+          ? this._values[0]
+          : this.values;
+
+      if (this.hasFired == 'success') {
+        return ret;
+      } else if (this.hasFired == 'error') {
+        throw ret;
+      }
+    }
 
     self.addCallback(function () {
       if (arguments.length == 1) {
