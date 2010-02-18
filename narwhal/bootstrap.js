@@ -1,4 +1,7 @@
 (function (modules) {
+
+    // -- kriskowal Kris Kowal Copyright (C) 2009-2010 MIT License
+
     // This file is an anonymous function expression.  The file is executed in
     // node_narwhal.cc to produce a Function.  The function is called in
     // node_narwhal.cc with a module memo that has been "primed" with native
@@ -6,9 +9,6 @@
     // globals.
 
     function main () {
-        var process = modules['node/process'];
-        var fs = modules['file'];
-        var system = modules['system'];
         var text = fs.read(system.prefix + "/narwhal.js");
         var factory = process.compile(text, "narwhal.js", 1);
         factory(modules);
@@ -38,7 +38,7 @@
                         names.push(name);
                 return exports.compile(
                     Array(lineNo).join("\n") +
-                    "(function(" + names.join(",") + "){" + text + "\n//*/\n})",
+                    "(function(" + names.join(",") + "){" + text + "\n})",
                     fileName
                 ).apply(null, names.map(function (name) {
                     return inject[name];
@@ -48,7 +48,7 @@
         };
 
         exports.print = function () {
-            modules['node/process'].stdio.write(
+            modules['node/process'].stdio.writeError(
                 Array.prototype.join.call(arguments, " ") + "\n"
             );
             return exports;
@@ -70,7 +70,11 @@
         };
 
         exports.read = function (path) {
-            var fd = fs.open(path, k.O_RDONLY, 0666);
+            try {
+                var fd = fs.open(path, k.O_RDONLY, 0666);
+            } catch (exception) {
+                throw new Error("Failed to open " + path);
+            }
             try {
                 var chunks = [];
                 var pos = 0;
@@ -89,6 +93,10 @@
         };
 
     })(modules.file = {});
+
+    var process = modules['node/process'];
+    var fs = modules['file'];
+    var system = modules['system'];
 
     main();
 
