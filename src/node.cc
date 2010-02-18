@@ -612,7 +612,6 @@ int getmem(size_t *rss, size_t *vsize) {
 #ifdef __linux__
 # define HAVE_GETMEM 1
 # include <sys/param.h> /* for MAXPATHLEN */
-# include <sys/user.h> /* for PAGE_SIZE */
 
 int getmem(size_t *rss, size_t *vsize) {
   FILE *f = fopen("/proc/self/stat", "r");
@@ -621,6 +620,7 @@ int getmem(size_t *rss, size_t *vsize) {
   int itmp;
   char ctmp;
   char buffer[MAXPATHLEN];
+  size_t page_size = getpagesize();
 
   /* PID */
   if (fscanf(f, "%d ", &itmp) == 0) goto error;
@@ -673,7 +673,7 @@ int getmem(size_t *rss, size_t *vsize) {
 
   /* Resident set size */
   if (fscanf (f, "%u ", &itmp) == 0) goto error;
-  *rss = (size_t) itmp * PAGE_SIZE;
+  *rss = (size_t) itmp * page_size;
 
   /* rlim */
   if (fscanf (f, "%u ", &itmp) == 0) goto error;
@@ -901,7 +901,7 @@ static void DebugMessageCallback(EV_P_ ev_async *watcher, int revents) {
   HandleScope scope;
   assert(watcher == &debug_watcher);
   assert(revents == EV_ASYNC);
-  ExecuteString(String::New("1+1;"), String::New("debug_poll"));
+  Debug::ProcessDebugMessages();
 }
 
 static void DebugMessageDispatch(void) {
@@ -1148,18 +1148,15 @@ int main(int argc, char *argv[]) {
 
   V8::SetFatalErrorHandler(node::OnFatalError);
 
-#define AUTO_BREAK_FLAG "--debugger_auto_break"
   // If the --debug flag was specified then initialize the debug thread.
   if (node::use_debug_agent) {
-    // First apply --debugger_auto_break setting to V8. This is so we can
-    // enter V8 by just executing any bit of javascript
-    V8::SetFlagsFromString(AUTO_BREAK_FLAG, sizeof(AUTO_BREAK_FLAG));
     // Initialize the async watcher for receiving messages from the debug
     // thread and marshal it into the main thread. DebugMessageCallback()
     // is called from the main thread to execute a random bit of javascript
     // - which will give V8 control so it can handle whatever new message
     // had been received on the debug thread.
     ev_async_init(&node::debug_watcher, node::DebugMessageCallback);
+    ev_set_priority(&node::debug_watcher, EV_MAXPRI);
     // Set the callback DebugMessageDispatch which is called from the debug
     // thread.
     Debug::SetDebugMessageDispatchHandler(node::DebugMessageDispatch);

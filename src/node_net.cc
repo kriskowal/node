@@ -96,6 +96,7 @@ void Connection::Initialize(v8::Handle<v8::Object> target) {
 
   NODE_SET_PROTOTYPE_METHOD(constructor_template, "connect", Connect);
   NODE_SET_PROTOTYPE_METHOD(constructor_template, "send", Send);
+  NODE_SET_PROTOTYPE_METHOD(constructor_template, "write", Write);
   NODE_SET_PROTOTYPE_METHOD(constructor_template, "close", Close);
   NODE_SET_PROTOTYPE_METHOD(constructor_template, "forceClose", ForceClose);
   NODE_SET_PROTOTYPE_METHOD(constructor_template, "setEncoding", SetEncoding);
@@ -112,12 +113,12 @@ void Connection::Initialize(v8::Handle<v8::Object> target) {
   #endif
 
   // Getter for connection.readyState
-  constructor_template->PrototypeTemplate()->SetAccessor(
+  constructor_template->InstanceTemplate()->SetAccessor(
       ready_state_symbol,
       ReadyStateGetter);
 
   // Getter for connection.readyState
-  constructor_template->PrototypeTemplate()->SetAccessor(
+  constructor_template->InstanceTemplate()->SetAccessor(
       fd_symbol,
       FDGetter);
 
@@ -225,7 +226,7 @@ Handle<Value> Connection::Connect(const Arguments& args) {
   }
 
   // If connect() is called on an open connection, raise an error.
-  if (connection->ReadyState() != EVCOM_INITIALIZED) {
+  if (connection->ReadyState() != EVCOM_INITIALIZED || connection->resolving_) {
     Local<Value> exception = Exception::Error(
         String::New("Socket is not in CLOSED state."));
     return ThrowException(exception);
@@ -586,7 +587,17 @@ Handle<Value> Connection::SetNoDelay(const Arguments& args) {
   return Undefined();
 }
 
+
 Handle<Value> Connection::Send(const Arguments& args) {
+  HandleScope scope;
+  return ThrowException(Exception::Error(String::New(
+        "connection.send() has been renamed to connection.write(). "
+        "(Also the 'receive' event has been renamed to 'data' and "
+        "the 'eof' event has been renamed to 'end'.)")));
+}
+
+
+Handle<Value> Connection::Write(const Arguments& args) {
   HandleScope scope;
   Connection *connection = ObjectWrap::Unwrap<Connection>(args.Holder());
   assert(connection);
@@ -609,7 +620,7 @@ Handle<Value> Connection::Send(const Arguments& args) {
   char * buf = new char[len];
   ssize_t written = DecodeWrite(buf, len, args[0], enc);
   assert(written == len);
-  connection->Send(buf, written);
+  connection->Write(buf, written);
   delete [] buf;
 
   return scope.Close(Integer::New(written));

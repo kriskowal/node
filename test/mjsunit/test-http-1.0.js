@@ -10,8 +10,8 @@ var client_got_eof = false;
 
 var server = http.createServer(function (req, res) {
   res.sendHeader(200, {"Content-Type": "text/plain"});
-  res.sendBody(body);
-  res.finish();
+  res.write(body);
+  res.close();
 })
 server.listen(port);
 
@@ -20,7 +20,7 @@ var c = tcp.createConnection(port);
 c.setEncoding("utf8");
 
 c.addListener("connect", function () {
-  c.send( "GET / HTTP/1.0\r\n\r\n" );
+  c.write( "GET / HTTP/1.0\r\n\r\n" );
 });
 
 c.addListener("data", function (chunk) {
