@@ -41,12 +41,14 @@ exports.B_SET = function(bytes, index, value) {
 };
 
 exports.B_DECODE = function(bytes, offset, length, charset) {
-    print('decoding ' + bytes.length);
     length = Number(length === undefined ? bytes.length : length);
     if (/^utf-?8$/i.test(charset)) {
         return bytes.utf8Slice(offset, length);
     } else if (/^(us-)?ascii$/i.test(charset)) {
-        return bytes.asciiSlice(offset, length);
+        bytes = bytes.asciiRange(offset, length);
+        var copy = new Buffer(bytes.length);
+        exports.B_COPY(bytes, undefined, copy);
+        return copy;
     } else {
         throw new Error("Charset not supported: " + charset);
     }
@@ -57,7 +59,6 @@ exports.B_DECODE_DEFAULT = function(bytes, offset, length) {
 };
 
 exports.B_ENCODE = function(string, charset) {
-    print('encoding ' + string);
     var buffer = new Buffer(string.length * 4);
     var length;
     if (/^utf-?8$/i.test(charset)) {
@@ -67,8 +68,9 @@ exports.B_ENCODE = function(string, charset) {
     } else {
         throw new Error("Charset not supported: " + charset);
     }
-    print('length ' + length);
-    return buffer.slice(0, length);
+    var actual = new Buffer(length);
+    exports.B_COPY(buffer, undefined, actual);
+    return actual.range(0, length);
 };
 
 exports.B_ENCODE_DEFAULT = function(string) {

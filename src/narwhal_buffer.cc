@@ -79,12 +79,12 @@ static inline void blob_unref(Blob *blob) {
 }
 
 
-// When someone calls buffer.asciiSlice, data is not copied. Instead V8
+// When someone calls buffer.asciiRange, data is not copied. Instead V8
 // references in the underlying Blob with this ExternalAsciiStringResource.
-class AsciiSliceExt: public String::ExternalAsciiStringResource {
+class AsciiRangeExt: public String::ExternalAsciiStringResource {
  friend class Buffer;
  public:
-  AsciiSliceExt(Buffer *parent, size_t start, size_t end) {
+  AsciiRangeExt(Buffer *parent, size_t start, size_t end) {
     blob_ = parent->blob();
     blob_ref(blob_);
 
@@ -95,7 +95,7 @@ class AsciiSliceExt: public String::ExternalAsciiStringResource {
   }
 
 
-  ~AsciiSliceExt() {
+  ~AsciiRangeExt() {
     //fprintf(stderr, "free ascii slice (%d refs left)\n", blob_->refs);
     blob_unref(blob_);
   }
@@ -171,11 +171,11 @@ Buffer::~Buffer() {
 }
 
 
-Handle<Value> Buffer::AsciiSlice(const Arguments &args) {
+Handle<Value> Buffer::AsciiRange(const Arguments &args) {
   HandleScope scope;
   Buffer *parent = ObjectWrap::Unwrap<Buffer>(args.This());
   SLICE_ARGS(args[0], args[1])
-  AsciiSliceExt *ext = new AsciiSliceExt(parent, start, end);
+  AsciiRangeExt *ext = new AsciiRangeExt(parent, start, end);
   Local<String> string = String::NewExternal(ext);
   // There should be at least two references to the blob now - the parent
   // and the slice.
@@ -194,7 +194,7 @@ Handle<Value> Buffer::Utf8Slice(const Arguments &args) {
 }
 
 
-Handle<Value> Buffer::Slice(const Arguments &args) {
+Handle<Value> Buffer::Range(const Arguments &args) {
   HandleScope scope;
   Local<Value> argv[3] = { args.This(), args[0], args[1] };
   Local<Object> slice =
@@ -353,8 +353,8 @@ void Buffer::Initialize(Handle<Object> target) {
   constructor_template->SetClassName(String::NewSymbol("Buffer"));
 
   // copy free
-  NODE_SET_PROTOTYPE_METHOD(constructor_template, "asciiSlice", Buffer::AsciiSlice);
-  NODE_SET_PROTOTYPE_METHOD(constructor_template, "slice", Buffer::Slice);
+  NODE_SET_PROTOTYPE_METHOD(constructor_template, "asciiRange", Buffer::AsciiRange);
+  NODE_SET_PROTOTYPE_METHOD(constructor_template, "range", Buffer::Range);
   // TODO NODE_SET_PROTOTYPE_METHOD(t, "utf16Slice", Utf16Slice);
   // copy
   NODE_SET_PROTOTYPE_METHOD(constructor_template, "utf8Slice", Buffer::Utf8Slice);
