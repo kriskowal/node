@@ -23,6 +23,7 @@
 #include <node_stdio.h>
 #include <node_narwhal_bootstrap.h>
 #include <node_version.h>
+#include <narwhal_buffer.h>
 
 #include <v8-debug.h>
 
@@ -862,6 +863,10 @@ static Local<Object> Load(int argc, char *argv[]) {
 
   Handle<Object> module_system = Object::New();
   modules->Set(String::NewSymbol("system"), module_system);
+
+  Handle<Object> module_node_buffer = Object::New();
+  Buffer::Initialize(module_node_buffer);
+  modules->Set(String::NewSymbol("node/buffer"), module_node_buffer);
 
   Local<FunctionTemplate> process_template = FunctionTemplate::New();
   node::EventEmitter::Initialize(process_template);

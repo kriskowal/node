@@ -3,6 +3,8 @@
 // -- cadorn Christoph Dorn
 
 var exports = require('./file');
+var nodeFs = require("node/fs");
+var nodeSys = require("node/process")
 
 exports.SEPARATOR = '/';
 
@@ -17,6 +19,7 @@ exports.list = function (path) {
 
 // TODO necessary for package loading
 exports.canonical = function (path) {
+    return path;
     throw Error("canonical not yet implemented.");
 };
 
@@ -26,7 +29,7 @@ exports.exists = function (path) {
 
 // TODO necessary for lazy module reloading in sandboxes
 exports.mtime = function (path) {
-    throw Error("mtime not yet implemented.");
+    return nodeFs.stat(String(path)).mtime;
 };
 
 exports.size = function (path) {
@@ -34,9 +37,9 @@ exports.size = function (path) {
 };
 
 exports.stat = function (path) {
+    var stat = nodeFs.stat(String(path));
     return {
-        mtime: exports.mtime(path),
-        size: exports.size(path)
+        mtime: stat.mtime
     }
 };
 
@@ -107,6 +110,7 @@ exports.FileIO = function (path, mode, permissions) {
     } else if (write || append) {
         throw new Error("Writing IO not yet implemented.");
     } else if (read) {
+        throw new Error("Reading IO not yet implemented.");
         // FIXME temporary hack
         return {
             'read': function () {

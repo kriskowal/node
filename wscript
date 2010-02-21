@@ -410,6 +410,7 @@ def build(bld):
     src/node_stat.cc
     src/node_stdio.cc
     src/node_timer.cc
+    src/narwhal_buffer.cc
   """
   node_narwhal.includes = """
     src/ 

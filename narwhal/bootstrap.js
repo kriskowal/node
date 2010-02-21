@@ -9,9 +9,18 @@
     // globals.
 
     function main () {
-        var text = fs.read(system.prefix + "/narwhal.js");
-        var factory = process.compile(text, "narwhal.js", 1);
-        factory(modules);
+        try {
+            var text = fs.read(system.prefix + "/narwhal.js");
+            var factory = process.compile(text, "narwhal.js", 1);
+            factory(modules);
+        } catch (exception) {
+            if (exception instanceof Error) {
+                Error.captureStackTrace(this, main);
+                throw exception.stack;
+            } else {
+                throw exception;
+            }
+        }
     }
 
     // module "system"
