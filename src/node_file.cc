@@ -23,6 +23,7 @@ namespace node {
 using namespace v8;
 using namespace narwhal;
 
+
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 #define THROW_BAD_ARGS \
   ThrowException(Exception::TypeError(String::New("Bad argument")))
@@ -543,7 +544,7 @@ static Handle<Value> Read(const Arguments& args) {
   }
 }
 
-// fd, buffer, start, stop, callback
+// fd, buffer, start, stop, offset, callback
 Handle<Value> File::ReadInto(const Arguments& args) {
   HandleScope scope;
 
@@ -555,26 +556,60 @@ Handle<Value> File::ReadInto(const Arguments& args) {
   off_t offset = -1; // sentinel
   ssize_t ret;
 
-  /*
-  if (args.Length() < 2 || !args[0]->IsInt32() || !args[1]->IsNumber()) {
-    return THROW_BAD_ARGS;
-  }
-  */
-
+  // fd
+  if (!args[0]->IsInt32())
+    return ThrowException(String::New("readInto() arguments[0] must be a "
+      "file descriptor Number"));
   fd = args[0]->Int32Value();
+
+  // buffer
+  if (!args[1]->IsObject() /*|| !Buffer::HasInstance(args[1]) */)
+    return ThrowException(String::New("readInto() arguments[1] 'buffer' "
+      "must be a Buffer Object"));
   buffer = ObjectWrap::Unwrap<Buffer>(args[1]->ToObject());
   buf = buffer->data_;
-  start = args[2]->Int32Value();
-  stop = args[3]->Int32Value();
+
+  // start
+  if (args[2]->IsUndefined())
+    start = 0;
+  else if (args[2]->IsInt32())
+    start = args[2]->Int32Value();
+  else
+    return ThrowException(String::New("readInto() arguments[2] 'start' "
+      "must be a Number if it is defined"));
+  if (start < 0)
+    return ThrowException(String::New("readInto() arguments[2] 'start must "
+      "be a positive Number if it is defined."));
+
+  // stop
+  if (args[3]->IsUndefined())
+    stop = buffer->length_;
+  else if (args[3]->IsInt32())
+    stop = args[3]->Int32Value();
+  else
+    return ThrowException(String::New("readInto() arguments[3] 'stop' must "
+      "be a Number if it is defined"));
+  if (stop > buffer->length_)
+    return ThrowException(String::New("readInto() arguments[3] 'stop' must "
+      "be less than or equal to the buffer's length"));
+
   length = stop - start;
-  //off_t offset = args[2]->IsNumber() ? args[2]->IntegerValue() : -1;
+  assert(start + length <= buffer->length_);
 
-  if (start + length > buffer->length_)
-    return ThrowException(String::New(
-      "Cannot write beyond the bounds of a Buffer"));
+  // offset
+  if (args[4]->IsUndefined())
+    offset = 0;
+  else if (args[4]->IsInt32())
+    offset = args[4]->Int32Value();
+  else
+    return ThrowException(String::New("readInto() arguments[4] 'offset' "
+      "must be an integer if defined"));
+  if (offset <= 0)
+      offset = -1; // a sentinel for non-offset read
 
-  if (args[4]->IsFunction()) {
-    ASYNC_CALL(read, args[4], fd, NULL, length, offset)
+  // callback
+  if (args[5]->IsFunction()) {
+    ASYNC_CALL(read, args[5], fd, NULL, length, offset)
   } else {
     if (offset < 0) {
       ret = read(fd, buf, length);
@@ -585,6 +620,7 @@ Handle<Value> File::ReadInto(const Arguments& args) {
       return ThrowException(errno_exception(errno));
     return scope.Close(Number::New(ret));
   }
+
 }
 
 // fd, buffer, start, stop, callback
@@ -598,22 +634,56 @@ Handle<Value> File::WriteFrom(const Arguments& args) {
   int written;
   off_t offset = -1; // sentinel for use write
 
-  //if (args.Length() < 4 || !args[0]->IsInt32()) {
-  //  return THROW_BAD_ARGS;
-  //}
-
+  // fd
+  if (!args[0]->IsInt32())
+    return ThrowException(String::New("writeFrom() arguments[0] must be a "
+      "file descriptor Number"));
   fd = args[0]->Int32Value();
+
+  // buffer
+  if (!args[1]->IsObject() /*|| !Buffer::HasInstance(args[1]) */)
+    return ThrowException(String::New("writeFrom() arguments[1] 'buffer' "
+      "must be a Buffer Object"));
   buffer = ObjectWrap::Unwrap<Buffer>(args[1]->ToObject());
-  start = args[2]->Int32Value();
-  stop = args[3]->Int32Value();
+  buf = buffer->data_;
+
+  // start
+  if (args[2]->IsUndefined())
+    start = 0;
+  else if (args[2]->IsInt32())
+    start = args[2]->Int32Value();
+  else
+    return ThrowException(String::New("writeFrom() arguments[2] 'start' "
+      "must be a Number if it is defined"));
+  if (start < 0)
+    return ThrowException(String::New("writeFrom() arguments[2] 'start must "
+      "be a positive Number if it is defined."));
+
+  // stop
+  if (args[3]->IsUndefined())
+    stop = buffer->length_;
+  else if (args[3]->IsInt32())
+    stop = args[3]->Int32Value();
+  else
+    return ThrowException(String::New("writeFrom() arguments[3] 'stop' must "
+      "be a Number if it is defined"));
+  if (stop > buffer->length_)
+    return ThrowException(String::New("writeFrom() arguments[3] 'stop' must "
+      "be less than or equal to the buffer's length"));
+
   length = stop - start;
-  //offset = args[2]->IsNumber() ? args[2]->IntegerValue() : -1;
+  assert(start + length <= buffer->length_);
 
-  if (start + length > buffer->length_)
-    return ThrowException(String::New(
-      "Cannot write beyond the bounds of a Buffer"));
-
-  //assert(start + length <= buffer
+  // offset
+  if (args[4]->IsUndefined())
+    offset = 0;
+  else if (args[4]->IsInt32())
+    offset = args[4]->Int32Value();
+  else
+    return ThrowException(String::New("writeFrom() arguments[4] 'offset' "
+      "must be an integer if defined"));
+  if (offset <= 0)
+      offset = -1; // a sentinel for non-offset read
 
   if (args[4]->IsFunction()) {
     ASYNC_CALL(write, args[4], fd, buf + start, length, offset)

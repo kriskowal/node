@@ -38,8 +38,9 @@ using namespace v8;
   }
 
 
-static Persistent<String> length_symbol;
 Persistent<FunctionTemplate> Buffer::constructor_template;
+static Persistent<String> length_symbol;
+
 
 
 // Each javascript Buffer object is backed by a Blob object.
@@ -219,7 +220,7 @@ Handle<Value> Buffer::Utf8Write(const Arguments &args) {
 
   size_t offset = args[1]->Int32Value();
 
-  if (offset >= buffer->length_) {
+  if (offset > buffer->length_) {
     return ThrowException(Exception::TypeError(String::New(
             "Offset is out of bounds")));
   }
@@ -251,7 +252,7 @@ Handle<Value> Buffer::AsciiWrite(const Arguments &args) {
 
   size_t offset = args[1]->Int32Value();
 
-  if (offset >= buffer->length_) {
+  if (offset > buffer->length_) {
     return ThrowException(Exception::TypeError(String::New(
             "Offset is out of bounds")));
   }

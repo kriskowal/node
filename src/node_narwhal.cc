@@ -218,13 +218,11 @@ ssize_t DecodeWrite(char *buf, size_t buflen,
   Local<String> str = val->ToString();
 
   if (encoding == UTF8) {
-    str->WriteUtf8(buf, buflen);
-    return buflen;
+    return str->WriteUtf8(buf, buflen);
   }
 
   if (encoding == ASCII) {
-    str->WriteAscii(buf, 0, buflen);
-    return buflen;
+    return str->WriteAscii(buf, 0, buflen);
   }
 
   // THIS IS AWFUL!!! FIXME
@@ -233,7 +231,7 @@ ssize_t DecodeWrite(char *buf, size_t buflen,
 
   uint16_t * twobytebuf = new uint16_t[buflen];
 
-  str->Write(twobytebuf, 0, buflen);
+  int actual = str->Write(twobytebuf, 0, buflen);
 
   for (size_t i = 0; i < buflen; i++) {
     unsigned char *b = reinterpret_cast<unsigned char*>(&twobytebuf[i]);
@@ -243,7 +241,7 @@ ssize_t DecodeWrite(char *buf, size_t buflen,
 
   delete [] twobytebuf;
 
-  return buflen;
+  return actual;
 }
 
 static Persistent<FunctionTemplate> stats_constructor_template;
@@ -855,6 +853,16 @@ static Handle<Value> ExecuteNativeJS(const char *filename, const char *data) {
   return scope.Close(result);
 }
 
+static Handle<Value> Write(const Arguments& args) {
+    Handle<String> string = args[0]->ToString();
+    int length = string->Length() * 4;
+    char *buffer = new char[length];
+    //int actual = string->WriteAscii(buffer, 0, length);
+    int actual = DecodeWrite(buffer, length, string, BINARY);
+    write(STDOUT_FILENO, buffer, actual);
+    delete buffer;
+};
+
 static Local<Object> Load(int argc, char *argv[]) {
   HandleScope scope;
 
@@ -927,6 +935,7 @@ static Local<Object> Load(int argc, char *argv[]) {
   NODE_SET_METHOD(process, "dlopen", DLOpen);
   NODE_SET_METHOD(process, "kill", Kill);
   NODE_SET_METHOD(process, "memoryUsage", MemoryUsage);
+  NODE_SET_METHOD(process, "write", Write);
 
   // Assign the EventEmitter. It was created in main().
   process->Set(String::NewSymbol("EventEmitter"),

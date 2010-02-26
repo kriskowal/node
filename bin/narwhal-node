@@ -24,7 +24,7 @@ export NARWHAL_HOME
 NARWHAL_ENGINE_BIN="$NODE_HOME/build/default/node_narwhal"
 
 # uses rlwrap (readline wrapper) if present
-NARWHAL="$(which rlwrap) $NARWHAL_ENGINE_BIN"
+NARWHAL="$(which rlwrap) $NARWHAL_ENGINE_BIN --"
 
 $NARWHAL "$@"
 

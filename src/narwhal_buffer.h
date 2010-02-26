@@ -35,7 +35,7 @@ struct Blob_;
 class Buffer : public node::ObjectWrap {
  public:
   static void Initialize(v8::Handle<v8::Object> target);
-  static inline bool HasInstance(v8::Handle<v8::Value> val) {
+  static bool HasInstance(v8::Handle<v8::Value> val) {
     if (!val->IsObject()) return false;
     v8::Local<v8::Object> obj = val->ToObject();
     return constructor_template->HasInstance(obj);

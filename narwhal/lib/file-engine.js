@@ -4,7 +4,8 @@
 
 var exports = require('./file');
 var nodeFs = require("node/fs");
-var nodeSys = require("node/process")
+var nodeProcess = require("node/process")
+var io = require("./io");
 
 exports.SEPARATOR = '/';
 
@@ -45,7 +46,8 @@ exports.stat = function (path) {
 
 // TODO necessary for package loading
 exports.isDirectory = function (path) {
-    throw Error("isDirectory not yet implemented.");
+    var stat = nodeFs.stat(String(path));
+    return stat.mode & nodeProcess.S_ISDIR;
 };
 
 // TODO necessary for module loading
@@ -55,9 +57,13 @@ exports.isDirectory = function (path) {
 
 // XXX remove this if you implement isFile here
 // from bootstrap system object:
+/*
 exports.isFile = system.fs.isFile;
+*/
 
+/*
 exports.isFile = system.fs.isFile; // TEMPORARY HACK
+*/
 
 exports.isLink = function (path) {
     throw Error("isLink not yet implemented.");
@@ -96,7 +102,9 @@ exports.touch = function (path, mtime) {
 };
 
 // FIXME temporary hack
+/*
 var read = system.fs.read; // from bootstrap system object
+*/
 
 exports.FileIO = function (path, mode, permissions) {
     mode = exports.mode(mode);
@@ -105,22 +113,20 @@ exports.FileIO = function (path, mode, permissions) {
         append = mode.append,
         update = mode.update;
 
+    var flags = 0;
+
     if (update) {
-        throw new Error("Updating IO not yet implemented.");
-    } else if (write || append) {
-        throw new Error("Writing IO not yet implemented.");
+        flags = nodeProcess.O_RDWR;
+    } else if (write) {
+        flags = nodeProcess.O_WRONLY;
+    } else if (append) {
+        flags = nodeProcess.O_WRONLY | nodeProcess.O_APPEND;
     } else if (read) {
-        throw new Error("Reading IO not yet implemented.");
-        // FIXME temporary hack
-        return {
-            'read': function () {
-                return read(path);
-            },
-            'close': function () {
-            }
-        };
+        flags = nodeProcess.O_RDONLY;
     } else {
         throw new Error("Files must be opened either for read, write, or update mode.");
     }
+
+    return io.ByteStream(nodeFs.open(path, flags, 0644));
 };
 
