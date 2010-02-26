@@ -11,28 +11,30 @@
 
 #include <node.h>
 
-namespace node {
 
+namespace narwhal {
+
+using namespace node;
 using namespace v8;
 
-#define SLICE_ARGS(start_arg, end_arg)                               \
-  if (!start_arg->IsInt32() || !end_arg->IsInt32()) {                \
+#define SLICE_ARGS(start_arg, stop_arg)                              \
+  if (!start_arg->IsInt32() || !stop_arg->IsInt32()) {               \
     return ThrowException(Exception::TypeError(                      \
           String::New("Bad argument.")));                            \
   }                                                                  \
   int32_t start = start_arg->Int32Value();                           \
-  int32_t end = end_arg->Int32Value();                               \
-  if (start < 0 || end < 0) {                                        \
+  int32_t stop = stop_arg->Int32Value();                             \
+  if (start < 0 || stop < 0) {                                       \
     return ThrowException(Exception::TypeError(                      \
           String::New("Bad argument.")));                            \
   }                                                                  \
-  if (!(start <= end)) {                                             \
+  if (!(start <= stop)) {                                            \
     return ThrowException(Exception::Error(                          \
-          String::New("Must have start <= end")));                   \
+          String::New("Must have start <= stop")));                  \
   }                                                                  \
-  if ((size_t)end > parent->length_) {                               \
+  if ((size_t)stop > parent->length_) {                              \
     return ThrowException(Exception::Error(                          \
-          String::New("end cannot be longer than parent.length")));  \
+          String::New("stop cannot be longer than parent.length"))); \
   }
 
 
@@ -84,12 +86,12 @@ static inline void blob_unref(Blob *blob) {
 class AsciiRangeExt: public String::ExternalAsciiStringResource {
  friend class Buffer;
  public:
-  AsciiRangeExt(Buffer *parent, size_t start, size_t end) {
+  AsciiRangeExt(Buffer *parent, size_t start, size_t stop) {
     blob_ = parent->blob();
     blob_ref(blob_);
 
-    assert(start <= end);
-    length_ = end - start;
+    assert(start <= stop);
+    length_ = stop - start;
     assert(length_ <= parent->length());
     data_ = parent->data() + start;
   }
@@ -122,10 +124,10 @@ Handle<Value> Buffer::New(const Arguments &args) {
 
   } else if (Buffer::HasInstance(args[0]) && args.Length() > 2) {
     // var slice = new Buffer(buffer, 123, 130);
-    // args: parent, start, end
+    // args: parent, start, stop
     Buffer *parent = ObjectWrap::Unwrap<Buffer>(args[0]->ToObject());
     SLICE_ARGS(args[1], args[2])
-    buffer = new Buffer(parent, start, end);
+    buffer = new Buffer(parent, start, stop);
   } else {
     return ThrowException(Exception::TypeError(String::New("Bad argument")));
   }
@@ -149,13 +151,13 @@ Buffer::Buffer(size_t length) : ObjectWrap() {
 }
 
 
-Buffer::Buffer(Buffer *parent, size_t start, size_t end) : ObjectWrap() {
+Buffer::Buffer(Buffer *parent, size_t start, size_t stop) : ObjectWrap() {
   blob_ = parent->blob_;
   assert(blob_->refs > 0);
   blob_ref(blob_);
 
-  assert(start <= end);
-  length_ = end - start;
+  assert(start <= stop);
+  length_ = stop - start;
   assert(length_ <= parent->length_);
   data_ = parent->data_ + start;
 
@@ -175,7 +177,7 @@ Handle<Value> Buffer::AsciiRange(const Arguments &args) {
   HandleScope scope;
   Buffer *parent = ObjectWrap::Unwrap<Buffer>(args.This());
   SLICE_ARGS(args[0], args[1])
-  AsciiRangeExt *ext = new AsciiRangeExt(parent, start, end);
+  AsciiRangeExt *ext = new AsciiRangeExt(parent, start, stop);
   Local<String> string = String::NewExternal(ext);
   // There should be at least two references to the blob now - the parent
   // and the slice.
@@ -189,7 +191,7 @@ Handle<Value> Buffer::Utf8Slice(const Arguments &args) {
   Buffer *parent = ObjectWrap::Unwrap<Buffer>(args.This());
   SLICE_ARGS(args[0], args[1])
   const char *data = reinterpret_cast<const char*>(parent->data_ + start);
-  Local<String> string = String::New(data, end - start);
+  Local<String> string = String::New(data, stop - start);
   return scope.Close(string);
 }
 

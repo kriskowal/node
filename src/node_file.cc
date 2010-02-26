@@ -9,10 +9,12 @@
 #include <assert.h>
 #include <string.h>
 #include <errno.h>
+#include <narwhal_buffer.h>
 
 namespace node {
 
 using namespace v8;
+using namespace narwhal;
 
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 #define THROW_BAD_ARGS \
@@ -428,12 +430,99 @@ static Handle<Value> Read(const Arguments& args) {
   }
 }
 
+// fd, buffer, start, stop, callback
+Handle<Value> File::ReadInto(const Arguments& args) {
+  HandleScope scope;
+
+  Buffer *buffer;
+  int fd;
+  char *buf;
+  int start, stop;
+  size_t length;
+  off_t offset = -1; // sentinel
+  ssize_t ret;
+
+  /*
+  if (args.Length() < 2 || !args[0]->IsInt32() || !args[1]->IsNumber()) {
+    return THROW_BAD_ARGS;
+  }
+  */
+
+  fd = args[0]->Int32Value();
+  buffer = ObjectWrap::Unwrap<Buffer>(args[1]->ToObject());
+  buf = buffer->data_;
+  start = args[2]->Int32Value();
+  stop = args[3]->Int32Value();
+  length = stop - start;
+  //off_t offset = args[2]->IsNumber() ? args[2]->IntegerValue() : -1;
+
+  if (start + length > buffer->length_)
+    return ThrowException(String::New(
+      "Cannot write beyond the bounds of a Buffer"));
+
+  if (args[4]->IsFunction()) {
+    ASYNC_CALL(read, args[4], fd, NULL, length, offset)
+  } else {
+    if (offset < 0) {
+      ret = read(fd, buf, length);
+    } else {
+      ret = pread(fd, buf, length, offset);
+    }
+    if (ret < 0)
+      return ThrowException(errno_exception(errno));
+    return scope.Close(Number::New(ret));
+  }
+}
+
+// fd, buffer, start, stop, callback
+Handle<Value> File::WriteFrom(const Arguments& args) {
+  HandleScope scope;
+
+  Buffer *buffer;
+  int fd;
+  char *buf = buffer->data_;
+  int start, stop, length;
+  int written;
+  off_t offset = -1; // sentinel for use write
+
+  //if (args.Length() < 4 || !args[0]->IsInt32()) {
+  //  return THROW_BAD_ARGS;
+  //}
+
+  fd = args[0]->Int32Value();
+  buffer = ObjectWrap::Unwrap<Buffer>(args[1]->ToObject());
+  start = args[2]->Int32Value();
+  stop = args[3]->Int32Value();
+  length = stop - start;
+  //offset = args[2]->IsNumber() ? args[2]->IntegerValue() : -1;
+
+  if (start + length > buffer->length_)
+    return ThrowException(String::New(
+      "Cannot write beyond the bounds of a Buffer"));
+
+  //assert(start + length <= buffer
+
+  if (args[4]->IsFunction()) {
+    ASYNC_CALL(write, args[4], fd, buf + start, length, offset)
+  } else {
+    if (offset < 0) {
+      written = write(fd, buf + start, length);
+    } else {
+      written = pwrite(fd, buf + start, length, offset);
+    }
+    if (written < 0)
+        return ThrowException(errno_exception(errno));
+    return scope.Close(Integer::New(written));
+  }
+}
+
 void File::Initialize(Handle<Object> target) {
   HandleScope scope;
 
   NODE_SET_METHOD(target, "close", Close);
   NODE_SET_METHOD(target, "open", Open);
   NODE_SET_METHOD(target, "read", Read);
+  NODE_SET_METHOD(target, "readInto", File::ReadInto);
   NODE_SET_METHOD(target, "rename", Rename);
   NODE_SET_METHOD(target, "truncate", Truncate);
   NODE_SET_METHOD(target, "rmdir", RMDir);
@@ -443,6 +532,7 @@ void File::Initialize(Handle<Object> target) {
   NODE_SET_METHOD(target, "stat", Stat);
   NODE_SET_METHOD(target, "unlink", Unlink);
   NODE_SET_METHOD(target, "write", Write);
+  NODE_SET_METHOD(target, "writeFrom", File::WriteFrom);
 
   errno_symbol = NODE_PSYMBOL("errno");
   encoding_symbol = NODE_PSYMBOL("node:encoding");

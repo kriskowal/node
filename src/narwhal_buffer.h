@@ -7,8 +7,9 @@
 #include <node.h>
 #include <node_object_wrap.h>
 #include <v8.h>
+#include <node_file.h>
 
-namespace node {
+namespace narwhal {
  
 /* A buffer is a chunk of memory stored outside the V8 heap, mirrored by an
  * object in javascript. The object is not totally opaque, one can access
@@ -31,7 +32,7 @@ namespace node {
  
 struct Blob_;
  
-class Buffer : public ObjectWrap {
+class Buffer : public node::ObjectWrap {
  public:
   static void Initialize(v8::Handle<v8::Object> target);
   static inline bool HasInstance(v8::Handle<v8::Value> val) {
@@ -63,12 +64,14 @@ class Buffer : public ObjectWrap {
   Buffer(Buffer *parent, size_t start, size_t end);
   ~Buffer();
  
-  const char *data_;
+  char *data_;
   size_t length_;
   struct Blob_ *blob_;
+
+ friend class node::File;
 };
 
 
-}  // namespace node buffer
+}  // namespace narwhal buffer
 
 #endif  // NARWHAL_BUFFER_H_
