@@ -101,7 +101,6 @@ namespace internal {
   V(Code, js_entry_code, JsEntryCode)                                          \
   V(Code, js_construct_entry_code, JsConstructEntryCode)                       \
   V(Code, c_entry_code, CEntryCode)                                            \
-  V(Code, debugger_statement_code, DebuggerStatementCode)                      \
   V(FixedArray, number_string_cache, NumberStringCache)                        \
   V(FixedArray, single_character_string_cache, SingleCharacterStringCache)     \
   V(FixedArray, natives_source_cache, NativesSourceCache)                      \
@@ -1046,7 +1045,6 @@ class Heap : public AllStatic {
   // These four Create*EntryStub functions are here because of a gcc-4.4 bug
   // that assigns wrong vtable entries.
   static void CreateCEntryStub();
-  static void CreateCEntryDebugBreakStub();
   static void CreateJSEntryStub();
   static void CreateJSConstructEntryStub();
   static void CreateRegExpCEntryStub();
@@ -1385,9 +1383,9 @@ class DescriptorLookupCache {
  private:
   static int Hash(DescriptorArray* array, String* name) {
     // Uses only lower 32 bits if pointers are larger.
-    uintptr_t array_hash =
+    uint32_t array_hash =
         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(array)) >> 2;
-    uintptr_t name_hash =
+    uint32_t name_hash =
         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(name)) >> 2;
     return (array_hash ^ name_hash) % kLength;
   }
