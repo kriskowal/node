@@ -28,6 +28,7 @@
 #include <v8-debug.h>
 
 using namespace v8;
+using namespace narwhal;
 
 extern char **environ;
 
@@ -998,7 +999,8 @@ static void ParseArgs(int *argc, char **argv) {
       dash_dash_index = i;
       break;
     } else if (strcmp(arg, "--debug") == 0) {
-      argv[i] = reinterpret_cast<const char*>("");
+      argv[i] = (char*)(malloc(1));
+      argv[i][0] = '\0';
       use_debug_agent = true;
       dash_dash_index = i;
     } else if (strcmp(arg, "--version") == 0 || strcmp(arg, "-v") == 0) {
@@ -1011,7 +1013,8 @@ static void ParseArgs(int *argc, char **argv) {
       PrintHelp();
       exit(0);
     } else if (strcmp(arg, "--v8-options") == 0) {
-      argv[i] = reinterpret_cast<const char*>("--help");
+      argv[i] = (char *)(malloc(strlen("--help") + 1));
+      strcpy(argv[i], "--help");
       dash_dash_index = i+1;
     }
   }
