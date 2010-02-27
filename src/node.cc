@@ -233,13 +233,11 @@ ssize_t DecodeWrite(char *buf, size_t buflen,
   Local<String> str = val->ToString();
 
   if (encoding == UTF8) {
-    str->WriteUtf8(buf, buflen);
-    return buflen;
+    return str->WriteUtf8(buf, buflen);
   }
 
   if (encoding == ASCII) {
-    str->WriteAscii(buf, 0, buflen);
-    return buflen;
+    return str->WriteAscii(buf, 0, buflen);
   }
 
   // THIS IS AWFUL!!! FIXME
@@ -248,7 +246,7 @@ ssize_t DecodeWrite(char *buf, size_t buflen,
 
   uint16_t * twobytebuf = new uint16_t[buflen];
 
-  str->Write(twobytebuf, 0, buflen);
+  int ret = str->Write(twobytebuf, 0, buflen);
 
   for (size_t i = 0; i < buflen; i++) {
     unsigned char *b = reinterpret_cast<unsigned char*>(&twobytebuf[i]);
@@ -258,7 +256,7 @@ ssize_t DecodeWrite(char *buf, size_t buflen,
 
   delete [] twobytebuf;
 
-  return buflen;
+  return ret;
 }
 
 static Persistent<FunctionTemplate> stats_constructor_template;
