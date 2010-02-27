@@ -96,7 +96,7 @@ exports.ByteStream = function (fd) {
 
 exports.TextInputStream = function (raw, lineBuffering, buffering, charset, options) {
 
-    var bytes = new BINARY.ByteArray(1024);
+    var bytes = new BINARY.ByteArray(1024 * 16);
     var chars = "";
     var end = 0;
 
