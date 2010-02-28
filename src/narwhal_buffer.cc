@@ -450,7 +450,7 @@ Handle<Value> CopyUtility(
       "be a positive Number if it is defined."));
 
   if (source_stop > source_buffer->length())
-    return ThrowException(String::New("copy/copyFrom) 'sourceStop' must "
+    return ThrowException(String::New("copy/copyFrom 'sourceStop' must "
       "be less than or equal to the buffer's length"));
 
   if (target_start < 0)
@@ -562,11 +562,11 @@ Handle<Value> Buffer::CopyFrom(const Arguments &args) {
   target_buffer = ObjectWrap::Unwrap<Buffer>(args.This()->ToObject());
   target = source_buffer->data();
 
-  // target
-  if (!args[0]->IsObject() || !Buffer::HasInstance(args[1]))
+  // source
+  if (!args[0]->IsObject() || !Buffer::HasInstance(args[0]))
     return ThrowException(String::New("copyFrom() arguments[1] 'source' "
       "must be a Buffer Object"));
-  source_buffer = ObjectWrap::Unwrap<Buffer>(args[1]->ToObject());
+  source_buffer = ObjectWrap::Unwrap<Buffer>(args[0]->ToObject());
   source = source_buffer->data();
 
   // start

@@ -4,6 +4,7 @@
 
 var BINARY = require("binary");
 var nodeFs = require("node/fs");
+var Buffer = require("node/buffer").Buffer;
 
 var IO = exports.IO = function(inputStream, outputStream) {
     this.inputStream = inputStream;
@@ -80,10 +81,10 @@ exports.ByteStream = function (fd) {
             }
         },
         "readInto": function (buffer, start, stop) {
-            return nodeFs.readInto(fd, buffer._bytes, start, stop, 0);
+            return nodeFs.readInto(fd, buffer._bytes || buffer, start, stop, 0);
         },
         "write": function (binary, start, stop) {
-            nodeFs.writeFrom(fd, binary._bytes, start, stop, 0);
+            nodeFs.writeFrom(fd, binary._bytes || buffer, start, stop, 0);
         },
         "flush": function () {
             //nodeFs.flush(fd);
@@ -96,8 +97,9 @@ exports.ByteStream = function (fd) {
 
 exports.TextInputStream = function (raw, lineBuffering, buffering, charset, options) {
 
-    var bytes = new BINARY.ByteArray(1024 * 16);
     var chars = "";
+    var length = 1024;
+    var bytes = new Buffer(length);
     var end = 0;
 
     var self = this;
@@ -105,26 +107,32 @@ exports.TextInputStream = function (raw, lineBuffering, buffering, charset, opti
     self.raw = raw;
 
     self.readLine = function () {
+        var pos;
         do {
-            var actual = raw.readInto(bytes, end, 1024 * 16);
-            end += actual;
-            for (var i = 0; i < 4; i++) {
-                try {
-                    chars += bytes.slice(0, end - i).toString(charset);
-                } catch (exception) {
-                }
-            }
-            end = 0;
-            var pos;
             if ((pos = chars.indexOf("\n")) >= 0) {
+                var result = chars.slice(0, pos + 1);
+                chars = chars.slice(pos + 1);
+                return result;
+            }
+            if (end === length) {
+                var oldBytes = bytes;
+                bytes = new Buffer(length *= 2);
+                bytes.copyFrom(oldBytes);
+            }
+            var actual = raw.readInto(bytes, end, length);
+            end += actual;
+            if (actual > 0) {
                 try {
-                    return chars.slice(0, pos + 1);
-                } finally {
-                    chars = "";
+                    chars = chars + bytes.range(0, end).toString(charset);
+                    bytes.range(end).copy(bytes);
+                    end = 0;
+                } catch (exception) {
+                    print(exception);
+                    throw new Error("cannot handle broken byte sequences yet" + bytes.range(0, end).toSource());
                 }
             }
         } while (actual > 0);
-        return chars + bytes.toString(charset);
+        return chars;
     };
 
     self.next = function () {
