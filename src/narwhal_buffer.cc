@@ -7,6 +7,7 @@
 #include <stdlib.h> // malloc, free
 #include <string.h> // memcpy, memmove
 #include <arpa/inet.h>  // htons, htonl
+#include <iconv.h>
 
 #include <v8.h>
 #include <node.h>

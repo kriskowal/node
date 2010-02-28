@@ -39,6 +39,10 @@
         exports.prefix = exports.env["NARWHAL_HOME"];
         exports.prefixes = [exports.prefix];
 
+        exports.evalGlobal = function (text) {
+            return exports.compile(text, '<string>', 1);
+        };
+
         exports.evaluate = function (text, fileName, lineNo) {
             var factory = function (inject) {
                 var names = [];
@@ -57,7 +61,7 @@
         };
 
         exports.print = function () {
-            modules['node/process'].stdio.writeError(
+            modules['node/process'].print(
                 Array.prototype.join.call(arguments, " ") + "\n"
             );
             return exports;

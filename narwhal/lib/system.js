@@ -5,11 +5,9 @@
 var io = require("./io");
 var fs = require("./file");
 
-/*
 exports.print = function () {
     exports.stdout.write(Array.prototype.join.call(arguments, ' ') + "\n").flush();
 };
-*/
 
 var rawStdin =  io.ByteStream(0);
 var rawStdout = io.ByteStream(1);

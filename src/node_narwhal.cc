@@ -23,6 +23,7 @@
 #include <node_stdio.h>
 #include <node_narwhal_bootstrap.h>
 #include <node_version.h>
+#include <node_iconv.h>
 #include <narwhal_buffer.h>
 
 #include <v8-debug.h>
@@ -863,6 +864,16 @@ static Handle<Value> Write(const Arguments& args) {
     delete buffer;
 };
 
+static Handle<Value> Print(const v8::Arguments &args) {
+    Handle<String> line = args[0]->ToString();
+    size_t length = line->Length();
+    char *buffer = new char[length + 1];
+    line->WriteAscii(buffer);
+    write(STDOUT_FILENO, buffer, length);
+    write(STDOUT_FILENO, "\n", 1);
+    delete buffer;
+}
+
 static Local<Object> Load(int argc, char *argv[]) {
   HandleScope scope;
 
@@ -876,6 +887,10 @@ static Local<Object> Load(int argc, char *argv[]) {
   Handle<Object> module_node_buffer = Object::New();
   Buffer::Initialize(module_node_buffer);
   modules->Set(String::NewSymbol("node/buffer-embedding"), module_node_buffer);
+
+  Handle<Object> module_node_encodings = Object::New();
+  Transcoder::Initialize(module_node_encodings);
+  modules->Set(String::NewSymbol("node/encodings"), module_node_encodings);
 
   Local<FunctionTemplate> process_template = FunctionTemplate::New();
   node::EventEmitter::Initialize(process_template);
@@ -923,6 +938,7 @@ static Local<Object> Load(int argc, char *argv[]) {
   module_system->Set(String::NewSymbol("env"), env);
 
   // define various internal methods
+  NODE_SET_METHOD(process, "print", Print);
   NODE_SET_METHOD(process, "loop", Loop);
   NODE_SET_METHOD(process, "unloop", Unloop);
   NODE_SET_METHOD(process, "compile", Compile);
@@ -949,7 +965,7 @@ static Local<Object> Load(int argc, char *argv[]) {
 
 
   // Initialize the C++ modules..................filename of module
-  Stdio::Initialize(process);                  // stdio.cc
+  //Stdio::Initialize(process);                  // stdio.cc
   Timer::Initialize(process);                  // timer.cc
   SignalHandler::Initialize(process);          // signal_handler.cc
   Stat::Initialize(process);                   // stat.cc

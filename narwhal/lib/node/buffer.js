@@ -1,5 +1,6 @@
 
 var Buffer = exports.Buffer = require("node/buffer-embedding").Buffer;
+var Transcoder = require("node/encodings").Transcoder;
 
 Buffer.prototype.toString = function (encoding) {
     var that = this;
@@ -20,13 +21,25 @@ Buffer.prototype.toStringRadix = function (radix) {
 };
 
 Buffer.prototype.toStringCharset = function (charset) {
-    if (/^utf-?8$/i.test(charset)) {
-        return this.utf8Slice();
-    } else if (/^(us-)?ascii$/i.test(charset)) {
-        return this.asciiRange().slice();
-    } else {
-        throw new Error("Charset not supported: " + charset);
-    }
+    var transcoder = new Transcoder(charset, "UTF-8");
+    var length = this.length;
+    var buffer = new Buffer(length);
+    var sourceStart = 0;
+    var targetStart = 0;
+    do {
+        var result = transcoder.transcode(
+            this.range(sourceStart),
+            buffer.range(targetStart)
+        );
+        sourceStart = result[0];
+        targetStart = result[1];
+        if (sourceStart < this.length) {
+            var temp = new Buffer(length *= 2);
+            buffer.copy(temp);
+            buffer = temp;
+        }
+    } while (sourceStart < this.length);
+    return buffer.range(0, targetStart).utf8Slice();
 };
 
 Buffer.fromString = function (string, encoding) {
@@ -45,16 +58,32 @@ Buffer.fromStringRadix = function (string, radix) {
 };
 
 Buffer.fromStringCharset = function (string, charset) {
-    var buffer = new Buffer(string.length * 4);
-    var length;
-    if (/^utf-?8$/i.test(charset)) {
-        length = buffer.utf8Write(string);
-    } else if (/^(us-)?ascii$/i.test(charset)) {
-        length = buffer.asciiWrite(string);
-    } else {
-        throw new Error("Charset not supported: " + charset);
-    }
-    return buffer.range(0, length);
+    var at = 0, length = string.length;
+    do {
+        var source = new Buffer(length);
+        at += source.utf8Write(string.slice(at, string.length));
+        if (at < string.length) {
+            var temp = new Buffer(length *= 2);
+            source.copy(temp);
+            source = temp;
+        }
+    } while (at < string.length);
+    var transcoder = new Transcoder("UTF-8", charset);
+    var target = new Buffer(length);
+    do {
+        var result = transcoder.transcode(
+            source.range(sourceStart),
+            target.range(targetStart)
+        );
+        var sourceStart = result[0];
+        var targetStart = result[1];
+        if (sourceStart < source.length) {
+            var temp = new Buffer(length *= 2);
+            target.copy(temp);
+            target = temp;
+        }
+    } while (sourceStart < source.length)
+    return target.range(0, targetStart);
 };
 
 Buffer.prototype.valueOf = function (endian) {
@@ -75,8 +104,21 @@ Buffer.prototype.valueOf = function (endian) {
     return value;
 };
 
-Buffer.fromNumber = function (number, endian) {
+Buffer.fromNumber = function (value, endian) {
     throw new Error("Buffer.fromNumber NYI");
+
+    var buffer = new Buffer((Math.log(value) / Math.log(2)) >>> 0 + 1);
+    var i = 0;
+    if (endian === undefined || /^be$/i.test(endian)) {
+    } else if (/^le$/i.test(endian)) { // coercion deliberate
+        while (value) {
+            buffer[i++] = value & 0xFF;
+            value = value >> 8;
+        }
+    } else {
+        throw new Error("endian must be 'LE' or 'BE' if defined, got " + endian);
+    }
+    return buffer.range(0, i);
 };
 
 Buffer.prototype.toSource = function () {

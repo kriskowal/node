@@ -112,6 +112,10 @@ def configure(conf):
     conf.env.append_value("CCFLAGS", "-rdynamic")
     conf.env.append_value("LINKFLAGS_DL", "-rdynamic")
 
+  if not conf.check(lib='iconv', libpath=['/usr/lib', '/usr/local/lib'], uselib_store='ICONV'):
+    conf.fatal("Install libiconf")
+  conf.env.append_value("LINKFLAGS_DL", "-liconv")
+
   if sys.platform.startswith("freebsd"):
     conf.check(lib='kvm', uselib_store='KVM')
 
@@ -411,6 +415,7 @@ def build(bld):
     src/node_stdio.cc
     src/node_timer.cc
     src/narwhal_buffer.cc
+    src/node_iconv.cc
   """
   node_narwhal.includes = """
     src/ 
@@ -424,7 +429,7 @@ def build(bld):
   """
   node_narwhal.add_objects = 'ev eio evcom http_parser coupling'
   node_narwhal.uselib_local = ''
-  node_narwhal.uselib = 'GNUTLS GPGERROR UDNS V8 EXECINFO DL KVM'
+  node_narwhal.uselib = 'GNUTLS GPGERROR UDNS V8 EXECINFO DL KVM ICONV'
 
   node_narwhal.install_path = '${PREFIX}/bin'
   node_narwhal.chmod = 0755

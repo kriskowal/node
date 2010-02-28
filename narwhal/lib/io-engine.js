@@ -84,7 +84,9 @@ exports.ByteStream = function (fd) {
             return nodeFs.readInto(fd, buffer._bytes || buffer, start, stop, 0);
         },
         "write": function (binary, start, stop) {
-            nodeFs.writeFrom(fd, binary._bytes || buffer, start, stop, 0);
+            while (start < stop) {
+                start += nodeFs.writeFrom(fd, binary._bytes || buffer, start, stop, 0);
+            }
         },
         "flush": function () {
             //nodeFs.flush(fd);
