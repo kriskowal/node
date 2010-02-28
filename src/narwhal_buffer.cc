@@ -5,12 +5,11 @@
 
 #include <assert.h>
 #include <stdlib.h> // malloc, free
-#include <v8.h>
-
+#include <string.h> // memcpy, memmove
 #include <arpa/inet.h>  // htons, htonl
 
+#include <v8.h>
 #include <node.h>
-
 
 namespace narwhal {
 
@@ -36,7 +35,6 @@ using namespace v8;
     return ThrowException(Exception::Error(                          \
           String::New("stop cannot be longer than parent.length"))); \
   }
-
 
 Persistent<FunctionTemplate> Buffer::constructor_template;
 static Persistent<String> length_symbol;
@@ -114,31 +112,74 @@ class AsciiRangeExt: public String::ExternalAsciiStringResource {
 };
 
 
+// length, fill_opt
+// buffer, start_opt, stop_opt
+// defer to pure javascript:
+//     array, start_opt, stop_opt
+//     string, charset
 Handle<Value> Buffer::New(const Arguments &args) {
   HandleScope scope;
-
   Buffer *buffer;
+
+  Handle<Object> that;
+  if (Buffer::HasInstance(args.This())) {
+      that = args.This();
+  } else {
+      return ThrowException(String::New("Buffer must be constructed with "
+        "'new'"));
+  }
+
   if (args[0]->IsInt32()) {
-    // var buffer = new Buffer(1024);
     size_t length = args[0]->Uint32Value();
     buffer = new Buffer(length);
-
+    char fill = char(args[1]->Uint32Value());
+    for (char *at = buffer->data(); at < buffer->data() + buffer->length(); at++) {
+      *at = fill;
+    }
   } else if (Buffer::HasInstance(args[0]) && args.Length() > 2) {
     // var slice = new Buffer(buffer, 123, 130);
     // args: parent, start, stop
     Buffer *parent = ObjectWrap::Unwrap<Buffer>(args[0]->ToObject());
-    SLICE_ARGS(args[1], args[2])
+
+    // start
+    uint32_t start;
+    if (args[1]->IsUndefined())
+      start = 0;
+    else if (args[1]->IsInt32())
+      start = args[1]->Int32Value();
+    else
+      return ThrowException(String::New("Buffer() arguments[1] 'start' "
+        "must be a Number if it is defined"));
+
+    // stop
+    uint32_t stop;
+    if (args[2]->IsUndefined())
+      stop = parent->length();
+    else if (args[2]->IsInt32())
+      stop = args[2]->Int32Value();
+    else
+      return ThrowException(String::New("Buffer() arguments[2] 'stop' must "
+        "be a Number if it is defined"));
+
+    if (start < 0 || start > parent->length())
+      return ThrowException(String::New("Buffer() arguments[2] 'start' must "
+          " be within the bounds of the parent buffer."));
+    if (stop < 0 || stop > parent->length())
+      return ThrowException(String::New("Buffer() arguments[2] 'stop' must "
+          " be within the bounds of the parent buffer."));
+
     buffer = new Buffer(parent, start, stop);
+
   } else {
     return ThrowException(Exception::TypeError(String::New("Bad argument")));
   }
 
-  buffer->Wrap(args.This());
-  args.This()->SetIndexedPropertiesToExternalArrayData((void*)buffer->data_,
+  buffer->Wrap(that);
+  that->SetIndexedPropertiesToExternalArrayData((void*)buffer->data_,
                                                        kExternalUnsignedByteArray,
                                                        buffer->length_);
-  args.This()->Set(length_symbol, Integer::New(buffer->length_));
-  return args.This();
+  that->Set(length_symbol, Integer::New(buffer->length_));
+  return that;
 }
 
 
@@ -177,7 +218,34 @@ Buffer::~Buffer() {
 Handle<Value> Buffer::AsciiRange(const Arguments &args) {
   HandleScope scope;
   Buffer *parent = ObjectWrap::Unwrap<Buffer>(args.This());
-  SLICE_ARGS(args[0], args[1])
+
+  // start
+  uint32_t start;
+  if (args[0]->IsUndefined())
+    start = 0;
+  else if (args[0]->IsInt32())
+    start = args[0]->Int32Value();
+  else
+    return ThrowException(String::New("asciiRange() arguments[0] 'start' "
+      "must be a Number if it is defined"));
+
+  // stop
+  uint32_t stop;
+  if (args[1]->IsUndefined())
+    stop = parent->length();
+  else if (args[1]->IsInt32())
+    stop = args[1]->Int32Value();
+  else
+    return ThrowException(String::New("asciiRange() arguments[1] 'stop' must "
+      "be a Number if it is defined"));
+
+  if (start < 0 || start > parent->length())
+    return ThrowException(String::New("Buffer() arguments[2] 'start' must "
+        " be within the bounds of the parent buffer."));
+  if (stop < 0 || stop > parent->length())
+    return ThrowException(String::New("Buffer() arguments[2] 'stop' must "
+        " be within the bounds of the parent buffer."));
+
   AsciiRangeExt *ext = new AsciiRangeExt(parent, start, stop);
   Local<String> string = String::NewExternal(ext);
   // There should be at least two references to the blob now - the parent
@@ -190,7 +258,34 @@ Handle<Value> Buffer::AsciiRange(const Arguments &args) {
 Handle<Value> Buffer::Utf8Slice(const Arguments &args) {
   HandleScope scope;
   Buffer *parent = ObjectWrap::Unwrap<Buffer>(args.This());
-  SLICE_ARGS(args[0], args[1])
+
+  // start
+  uint32_t start;
+  if (args[0]->IsUndefined())
+    start = 0;
+  else if (args[0]->IsInt32())
+    start = args[0]->Int32Value();
+  else
+    return ThrowException(String::New("utf8Slice() arguments[0] 'start' "
+      "must be a Number if it is defined"));
+
+  // stop
+  uint32_t stop;
+  if (args[1]->IsUndefined())
+    stop = parent->length();
+  else if (args[1]->IsInt32())
+    stop = args[1]->Int32Value();
+  else
+    return ThrowException(String::New("utf8Slice() arguments[1] 'stop' must "
+      "be a Number if it is defined"));
+
+  if (start < 0 || start > parent->length())
+    return ThrowException(String::New("Buffer() arguments[2] 'start' must "
+        " be within the bounds of the parent buffer."));
+  if (stop < 0 || stop > parent->length())
+    return ThrowException(String::New("Buffer() arguments[2] 'stop' must "
+        " be within the bounds of the parent buffer."));
+
   const char *data = reinterpret_cast<const char*>(parent->data_ + start);
   Local<String> string = String::New(data, stop - start);
   return scope.Close(string);
@@ -332,7 +427,6 @@ Handle<Value> Buffer::Unpack(const Arguments &args) {
   return scope.Close(array);
 }
 
-
 // var nbytes = Buffer.utf8ByteLength("string")
 Handle<Value> Buffer::Utf8ByteLength(const Arguments &args) {
   HandleScope scope;
@@ -344,6 +438,226 @@ Handle<Value> Buffer::Utf8ByteLength(const Arguments &args) {
   return scope.Close(Integer::New(s->Utf8Length()));
 }
 
+Handle<Value> CopyUtility(
+  Buffer *source_buffer, char *source,
+  uint32_t source_start, uint32_t source_stop,
+  Buffer *target_buffer, char *target,
+  uint32_t target_start
+) {
+
+  if (source_start < 0)
+    return ThrowException(String::New("copy/copyFrom 'sourceStart' must "
+      "be a positive Number if it is defined."));
+
+  if (source_stop > source_buffer->length())
+    return ThrowException(String::New("copy/copyFrom) 'sourceStop' must "
+      "be less than or equal to the buffer's length"));
+
+  if (target_start < 0)
+    return ThrowException(String::New("copy/copyFrom 'targetStart' "
+      "must be a positive Number if it is defined."));
+
+  uint32_t length = source_stop - source_start;
+  if (target_start + length > target_buffer->length())
+    return ThrowException(String::New("copy/copyFrom the source range must "
+      "fit within the target."));
+
+  uint32_t target_stop = target_start + length;
+
+  // overlap
+  //    v  v  v  v
+  //    source---
+  //    ---target, or
+  //    target---
+  //    ---source, but not
+  //    v     v     v
+  //    source------
+  //    ------target, or
+  //    target------
+  //    ------source
+  if (
+    ( 
+      source + source_start <= target + target_start &&
+      target + target_start <  source + source_stop
+    ) ||
+    (
+      target + target_start <= source + source_start &&
+      source + source_start <  target + target_stop
+    )
+  ) {
+    // use memmove for overlapping buffers
+    memmove(target + target_start, source + source_start, length);
+  } else {
+    // use memcpy for non-overlapping buffers
+    memcpy(target + target_start, source + source_start, length);
+  }
+
+}
+
+// target, start, stop, target_start
+Handle<Value> Buffer::Copy(const Arguments &args) {
+  HandleScope scope;
+  Buffer *source_buffer, *target_buffer;
+  char *source, *target;
+  uint32_t source_start, source_stop, target_start, target_stop;
+
+  if (!Buffer::HasInstance(args.This()))
+    return ThrowException(String::New("copy() 'this' must be a Buffer "
+      "Object"));
+  source_buffer = ObjectWrap::Unwrap<Buffer>(args.This()->ToObject());
+  source = source_buffer->data();
+
+  // target
+  if (!args[0]->IsObject() || !Buffer::HasInstance(args[0]))
+    return ThrowException(String::New("copy() arguments[0] 'target' "
+      "must be a Buffer Object"));
+  target_buffer = ObjectWrap::Unwrap<Buffer>(args[0]->ToObject());
+  target = target_buffer->data();
+
+  // start
+  if (args[1]->IsUndefined())
+    source_start = 0;
+  else if (args[1]->IsInt32())
+    source_start = args[1]->Int32Value();
+  else
+    return ThrowException(String::New("copy() arguments[1] 'start' "
+      "must be a Number if it is defined"));
+
+  // stop
+  if (args[2]->IsUndefined())
+    source_stop = source_buffer->length();
+  else if (args[2]->IsInt32())
+    source_stop = args[2]->Int32Value();
+  else
+    return ThrowException(String::New("copy() arguments[2] 'stop' must "
+      "be a Number if it is defined"));
+
+  // target_start
+  if (args[3]->IsUndefined())
+    target_start = 0;
+  else if (args[3]->IsInt32())
+    target_start = args[3]->Int32Value();
+  else
+    return ThrowException(String::New("copy() arguments[3] 'targetStart' "
+      "must be a Number if it is defined"));
+
+  CopyUtility(
+      source_buffer, source, source_start, source_stop,
+      target_buffer, target, target_start
+  );
+
+  return args.This();
+};
+
+// source, start, stop, source_start
+Handle<Value> Buffer::CopyFrom(const Arguments &args) {
+  HandleScope scope;
+  Buffer *source_buffer, *target_buffer;
+  char *source, *target;
+  uint32_t source_start, source_stop, target_start, target_stop;
+
+  if (!Buffer::HasInstance(args.This()))
+    return ThrowException(String::New("copyFrom() 'this' must be a Buffer "
+      "Object"));
+  target_buffer = ObjectWrap::Unwrap<Buffer>(args.This()->ToObject());
+  target = source_buffer->data();
+
+  // target
+  if (!args[0]->IsObject() || !Buffer::HasInstance(args[1]))
+    return ThrowException(String::New("copyFrom() arguments[1] 'source' "
+      "must be a Buffer Object"));
+  source_buffer = ObjectWrap::Unwrap<Buffer>(args[1]->ToObject());
+  source = source_buffer->data();
+
+  // start
+  if (args[1]->IsUndefined())
+    target_start = 0;
+  else if (args[1]->IsInt32())
+    target_start = args[1]->Int32Value();
+  else
+    return ThrowException(String::New("copyFrom() arguments[1] 'start' "
+      "must be a Number if it is defined"));
+
+  // stop
+  if (args[2]->IsUndefined())
+    target_stop = target_buffer->length();
+  else if (args[2]->IsInt32())
+    target_stop = args[2]->Int32Value();
+  else
+    return ThrowException(String::New("copyFrom() arguments[2] 'stop' must "
+      "be a Number if it is defined"));
+
+  // target_start
+  if (args[3]->IsUndefined())
+    target_start = 0;
+  else if (args[3]->IsInt32())
+    target_start = args[3]->Int32Value();
+  else
+    return ThrowException(String::New("copyFrom() arguments[3] "
+      "'sourceStart' must be a Number if it is defined"));
+
+  CopyUtility(
+      source_buffer, source, source_start, source_stop,
+      target_buffer, target, target_start
+  );
+
+  return args.This();
+};
+
+Handle<Value> Buffer::Fill(const Arguments& args) {
+  Buffer *target_buffer;
+  char *target;
+  char fill, target_start, target_stop;
+
+  // target (this)
+  if (!Buffer::HasInstance(args.This()))
+    return ThrowException(String::New("fill() 'this' must be a Buffer "
+      "Object"));
+  target_buffer = ObjectWrap::Unwrap<Buffer>(args.This()->ToObject());
+  target = target_buffer->data();
+
+  // fill
+  if (args[0]->IsUndefined())
+    fill = 0;
+  else if (args[0]->IsInt32())
+    fill = char(args[0]->Int32Value());
+  else
+    return ThrowException(String::New("fill() arguments[0] 'fill' "
+      "must be a Number if it is defined"));
+
+  // start
+  if (args[1]->IsUndefined())
+    target_start = 0;
+  else if (args[1]->IsInt32())
+    target_start = args[1]->Int32Value();
+  else
+    return ThrowException(String::New("fill() arguments[1] 'start' "
+      "must be a Number if it is defined"));
+
+  // stop
+  if (args[2]->IsUndefined())
+    target_stop = target_buffer->length();
+  else if (args[2]->IsInt32())
+    target_stop = args[2]->Int32Value();
+  else
+    return ThrowException(String::New("fill() arguments[2] 'stop' must "
+      "be a Number if it is defined"));
+
+  if (target_start < 0)
+    return ThrowException(String::New("fill() arguments[0] 'start' must "
+      "be greater than zero"));
+
+  if (target_stop > target_buffer->length())
+    return ThrowException(String::New("fill() arguments[1] 'stop' must "
+      " be less than or equal to the length of this buffer"));
+
+  char *begin = target + target_start;
+  char *end = target + target_stop;
+  for (; begin != end; begin++)
+    *begin = fill;
+
+  return args.This();
+}
 
 void Buffer::Initialize(Handle<Object> target) {
   HandleScope scope;
@@ -354,6 +668,9 @@ void Buffer::Initialize(Handle<Object> target) {
   constructor_template = Persistent<FunctionTemplate>::New(t);
   constructor_template->InstanceTemplate()->SetInternalFieldCount(1);
   constructor_template->SetClassName(String::NewSymbol("Buffer"));
+
+  NODE_SET_PROTOTYPE_METHOD(constructor_template, "copy", Buffer::Copy);
+  NODE_SET_PROTOTYPE_METHOD(constructor_template, "copyFrom", Buffer::CopyFrom);
 
   // copy free
   NODE_SET_PROTOTYPE_METHOD(constructor_template, "asciiRange", Buffer::AsciiRange);

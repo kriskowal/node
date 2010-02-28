@@ -267,7 +267,7 @@ static Handle<Value> ReadLink(const Arguments& args) {
   HandleScope scope;
 
   if (args.Length() < 1 || !args[0]->IsString()) {
-    return THROW_BAD_ARGS;
+    return ThrowException(String::New("arguments[0] of readlink must be a string"));
   }
 
   String::Utf8Value path(args[0]->ToString());
@@ -567,7 +567,7 @@ Handle<Value> File::ReadInto(const Arguments& args) {
     return ThrowException(String::New("readInto() arguments[1] 'buffer' "
       "must be a Buffer Object"));
   buffer = ObjectWrap::Unwrap<Buffer>(args[1]->ToObject());
-  buf = buffer->data_;
+  buf = buffer->data();
 
   // start
   if (args[2]->IsUndefined())
@@ -578,23 +578,23 @@ Handle<Value> File::ReadInto(const Arguments& args) {
     return ThrowException(String::New("readInto() arguments[2] 'start' "
       "must be a Number if it is defined"));
   if (start < 0)
-    return ThrowException(String::New("readInto() arguments[2] 'start must "
+    return ThrowException(String::New("readInto() arguments[2] 'start' must "
       "be a positive Number if it is defined."));
 
   // stop
   if (args[3]->IsUndefined())
-    stop = buffer->length_;
+    stop = buffer->length();
   else if (args[3]->IsInt32())
     stop = args[3]->Int32Value();
   else
     return ThrowException(String::New("readInto() arguments[3] 'stop' must "
       "be a Number if it is defined"));
-  if (stop > buffer->length_)
+  if (stop > buffer->length())
     return ThrowException(String::New("readInto() arguments[3] 'stop' must "
       "be less than or equal to the buffer's length"));
 
   length = stop - start;
-  assert(start + length <= buffer->length_);
+  assert(start + length <= buffer->length());
 
   // offset
   if (args[4]->IsUndefined())
@@ -629,7 +629,7 @@ Handle<Value> File::WriteFrom(const Arguments& args) {
 
   Buffer *buffer;
   int fd;
-  char *buf = buffer->data_;
+  char *buf = buffer->data();
   int start, stop, length;
   int written;
   off_t offset = -1; // sentinel for use write
@@ -645,7 +645,7 @@ Handle<Value> File::WriteFrom(const Arguments& args) {
     return ThrowException(String::New("writeFrom() arguments[1] 'buffer' "
       "must be a Buffer Object"));
   buffer = ObjectWrap::Unwrap<Buffer>(args[1]->ToObject());
-  buf = buffer->data_;
+  buf = buffer->data();
 
   // start
   if (args[2]->IsUndefined())
@@ -661,18 +661,18 @@ Handle<Value> File::WriteFrom(const Arguments& args) {
 
   // stop
   if (args[3]->IsUndefined())
-    stop = buffer->length_;
+    stop = buffer->length();
   else if (args[3]->IsInt32())
     stop = args[3]->Int32Value();
   else
     return ThrowException(String::New("writeFrom() arguments[3] 'stop' must "
       "be a Number if it is defined"));
-  if (stop > buffer->length_)
+  if (stop > buffer->length())
     return ThrowException(String::New("writeFrom() arguments[3] 'stop' must "
       "be less than or equal to the buffer's length"));
 
   length = stop - start;
-  assert(start + length <= buffer->length_);
+  assert(start + length <= buffer->length());
 
   // offset
   if (args[4]->IsUndefined())

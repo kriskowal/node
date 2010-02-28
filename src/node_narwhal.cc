@@ -875,7 +875,7 @@ static Local<Object> Load(int argc, char *argv[]) {
 
   Handle<Object> module_node_buffer = Object::New();
   Buffer::Initialize(module_node_buffer);
-  modules->Set(String::NewSymbol("node/buffer"), module_node_buffer);
+  modules->Set(String::NewSymbol("node/buffer-embedding"), module_node_buffer);
 
   Local<FunctionTemplate> process_template = FunctionTemplate::New();
   node::EventEmitter::Initialize(process_template);

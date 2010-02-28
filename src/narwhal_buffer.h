@@ -41,13 +41,16 @@ class Buffer : public node::ObjectWrap {
     return constructor_template->HasInstance(obj);
   }
  
-  const char* data() const { return data_; }
+  char* data() const { return data_; }
   size_t length() const { return length_; }
   struct Blob_* blob() const { return blob_; }
  
  protected:
   static v8::Persistent<v8::FunctionTemplate> constructor_template;
   static v8::Handle<v8::Value> New(const v8::Arguments &args);
+  static v8::Handle<v8::Value> Fill(const v8::Arguments &args);
+  static v8::Handle<v8::Value> Copy(const v8::Arguments &args);
+  static v8::Handle<v8::Value> CopyFrom(const v8::Arguments &args);
   static v8::Handle<v8::Value> Range(const v8::Arguments &args);
   static v8::Handle<v8::Value> AsciiRange(const v8::Arguments &args);
   static v8::Handle<v8::Value> Utf8Slice(const v8::Arguments &args);
@@ -63,12 +66,10 @@ class Buffer : public node::ObjectWrap {
   Buffer(size_t length);
   Buffer(Buffer *parent, size_t start, size_t end);
   ~Buffer();
- 
+
   char *data_;
   size_t length_;
   struct Blob_ *blob_;
-
- friend class node::File;
 };
 
 

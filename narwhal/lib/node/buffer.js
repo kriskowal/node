@@ -1,0 +1,94 @@
+
+var Buffer = exports.Buffer = require("node/buffer-embedding").Buffer;
+
+Buffer.prototype.toString = function (encoding) {
+    var that = this;
+    if (arguments[1] !== undefined || arguments[2] !== undefined)
+        that = this.range(arguments[1], arguments[2]);
+    if (encoding) {
+        if (typeof encoding === "number")
+            return that.toStringRadix(encoding);
+        else
+            return that.toStringCharset(encoding);
+    } else {
+        return '[object Buffer ' + that.length + ']';
+    }
+};
+
+Buffer.prototype.toStringRadix = function (radix) {
+    return require("base" + radix).encode(this);
+};
+
+Buffer.prototype.toStringCharset = function (charset) {
+    if (/^utf-?8$/i.test(charset)) {
+        return this.utf8Slice();
+    } else if (/^(us-)?ascii$/i.test(charset)) {
+        return this.asciiRange().slice();
+    } else {
+        throw new Error("Charset not supported: " + charset);
+    }
+};
+
+Buffer.fromString = function (string, encoding) {
+    if (encoding) {
+        if (typeof encoding === "number")
+            return Buffer.fromStringRadix(string, encoding);
+        else
+            return Buffer.fromStringCharset(string, encoding);
+    } else {
+        throw new Error("Buffer.fromString requires either a numeric radix or a charset string");
+    }
+};
+
+Buffer.fromStringRadix = function (string, radix) {
+    return require("base" + radix).decode(string);
+};
+
+Buffer.fromStringCharset = function (string, charset) {
+    var buffer = new Buffer(string.length * 4);
+    var length;
+    if (/^utf-?8$/i.test(charset)) {
+        length = buffer.utf8Write(string);
+    } else if (/^(us-)?ascii$/i.test(charset)) {
+        length = buffer.asciiWrite(string);
+    } else {
+        throw new Error("Charset not supported: " + charset);
+    }
+    return buffer.range(0, length);
+};
+
+Buffer.prototype.valueOf = function (endian) {
+    if (this.length > 4)
+        return this;
+    var value = 0;
+    if (endian === undefined || /^be$/i.test(endian)) {
+        for (var i = 0, ii = this.length; i < ii;) {
+            value = (value << 8) + this[i++];
+        }
+    } else if (/^le$/i.test(endian)) { // coercion deliberate
+        for (var i = this.length; i >= 0;) {
+            value = value << 8 + this[--i];
+        }
+    } else {
+        throw new Error("endian must be 'LE' or 'BE' if defined, got " + endian);
+    }
+    return value;
+};
+
+Buffer.fromNumber = function (number, endian) {
+    throw new Error("Buffer.fromNumber NYI");
+};
+
+Buffer.prototype.toSource = function () {
+    return 'Buffer([' + this.toArray().join(', ') + '])';
+};
+
+Buffer.prototype.toArray = function () {
+    return Array.prototype.slice.call(this);
+};
+
+// for duck-typing with String
+Buffer.prototype.charCodeAt = function (i) {
+    return this[i];
+};
+
