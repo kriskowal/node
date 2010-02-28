@@ -328,7 +328,7 @@ Handle<Value> Buffer::Utf8Write(const Arguments &args) {
   }
 
   int written = s->WriteUtf8((char*)p);
-  return scope.Close(Integer::New(written));
+  return scope.Close(Integer::New(written - 1));
 }
 
 
