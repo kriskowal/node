@@ -423,6 +423,7 @@ static Handle<Value> Loop(const Arguments& args) {
 }
 
 static Handle<Value> Unloop(const Arguments& args) {
+  fprintf(stderr, "Node.js Depreciation: Don't use process.unloop(). It will be removed soon.\n");
   HandleScope scope;
   int how = EVUNLOOP_ONE;
   if (args[0]->IsString()) {
@@ -468,14 +469,18 @@ static Handle<Value> Cwd(const Arguments& args) {
 
 static Handle<Value> Umask(const Arguments& args){
   HandleScope scope;
-
-  if(args.Length() < 1 || !args[0]->IsInt32()) {
+  unsigned int old;
+  if(args.Length() < 1) {
+    old = umask(0);
+    umask((mode_t)old);
+  }
+  else if(!args[0]->IsInt32()) {
     return ThrowException(Exception::TypeError(
           String::New("argument must be an integer.")));
   }
-  unsigned int mask = args[0]->Uint32Value();
-  unsigned int old = umask((mode_t)mask);
-
+  else {
+    old = umask((mode_t)args[0]->Uint32Value());
+  }
   return scope.Close(Uint32::New(old));
 }
 
@@ -504,7 +509,7 @@ static Handle<Value> SetGid(const Arguments& args) {
   Local<Integer> given_gid = args[0]->ToInteger();
   int gid = given_gid->Int32Value();
   int result;
-  if ((result == setgid(gid)) != 0) {
+  if ((result = setgid(gid)) != 0) {
     return ThrowException(Exception::Error(String::New(strerror(errno))));
   }
   return Undefined();
