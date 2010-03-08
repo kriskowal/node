@@ -8,6 +8,7 @@
         "url": "http://four.livejournal.com/",
         "github": "ry"
     },
+    "lib": "narwhal/lib",
     "directories": {
         "lib": "narwhal/lib"
     }

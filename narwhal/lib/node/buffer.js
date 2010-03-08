@@ -1,12 +1,12 @@
 
-var Buffer = exports.Buffer = require("node/buffer-embedding").Buffer;
-var Transcoder = require("node/encodings").Transcoder;
+var Buffer = exports.Buffer = require("./buffer-embedding").Buffer;
+var Transcoder = require("./encodings").Transcoder;
 
 Buffer.prototype.toString = function (encoding) {
     var that = this;
     if (arguments[1] !== undefined || arguments[2] !== undefined)
         that = this.range(arguments[1], arguments[2]);
-    if (encoding) {
+    if (arguments.length !== 0) {
         if (typeof encoding === "number")
             return that.toStringRadix(encoding);
         else
@@ -21,6 +21,8 @@ Buffer.prototype.toStringRadix = function (radix) {
 };
 
 Buffer.prototype.toStringCharset = function (charset) {
+    if (charset === "UTF-8")
+        return this.utf8Slice();
     var transcoder = new Transcoder(charset, "UTF-8");
     var length = this.length;
     var buffer = new Buffer(length);
@@ -31,8 +33,8 @@ Buffer.prototype.toStringCharset = function (charset) {
             this.range(sourceStart),
             buffer.range(targetStart)
         );
-        sourceStart = result[0];
-        targetStart = result[1];
+        sourceStart = result.source;
+        targetStart = result.target;
         if (sourceStart < this.length) {
             var temp = new Buffer(length *= 2);
             buffer.copy(temp);
@@ -75,8 +77,8 @@ Buffer.fromStringCharset = function (string, charset) {
             source.range(sourceStart),
             target.range(targetStart)
         );
-        var sourceStart = result[0];
-        var targetStart = result[1];
+        var sourceStart = result.source;
+        var targetStart = result.target;
         if (sourceStart < source.length) {
             var temp = new Buffer(length *= 2);
             target.copy(temp);

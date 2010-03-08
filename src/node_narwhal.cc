@@ -9,11 +9,14 @@
 #include <unistd.h>
 #include <errno.h>
 #include <dlfcn.h> /* dlopen(), dlsym() */
+#include <sys/types.h>
+#include <unistd.h> /* setuid, getuid */
 
 #include <node_events.h>
 #include <node_dns.h>
 #include <node_net.h>
 #include <node_file.h>
+#include <node_idle_watcher.h>
 #include <node_http.h>
 #include <node_signal_handler.h>
 #include <node_stat.h>
@@ -21,10 +24,10 @@
 #include <node_child_process.h>
 #include <node_constants.h>
 #include <node_stdio.h>
-#include <node_narwhal_bootstrap.h>
 #include <node_version.h>
 #include <node_iconv.h>
 #include <narwhal_buffer.h>
+#include <node_narwhal_bootstrap.h>
 
 #include <v8-debug.h>
 
@@ -60,13 +63,28 @@ static Persistent<String> listeners_symbol;
 static Persistent<String> uncaught_exception_symbol;
 static Persistent<String> emit_symbol;
 
-static int dash_dash_index = 0;
+static int option_end_index = 0;
 static bool use_debug_agent = false;
+static bool debug_wait_connect = false;
+static int debug_port=5858;
 
 
 static ev_async eio_want_poll_notifier;
 static ev_async eio_done_poll_notifier;
 static ev_idle  eio_poller;
+
+static ev_timer  gc_timer;
+#define GC_INTERVAL 2.0
+
+
+// Node calls this every GC_INTERVAL seconds in order to try and call the
+// GC. This watcher is run with maximum priority, so ev_pending_count() == 0
+// is an effective measure of idleness.
+static void GCTimeout(EV_P_ ev_timer *watcher, int revents) {
+  assert(watcher == &gc_timer);
+  assert(revents == EV_TIMER);
+  if (ev_pending_count(EV_DEFAULT_UC) == 0) V8::IdleNotification();
+}
 
 
 static void DoPoll(EV_P_ ev_idle *watcher, int revents) {
@@ -155,7 +173,7 @@ enum encoding ParseEncoding(Handle<Value> encoding_v, enum encoding _default) {
 Local<Value> Encode(const void *buf, size_t len, enum encoding encoding) {
   HandleScope scope;
 
-  if (!len) return scope.Close(Null());
+  if (!len) return scope.Close(String::Empty());
 
   if (encoding == BINARY) {
     const unsigned char *cbuf = static_cast<const unsigned char*>(buf);
@@ -200,7 +218,6 @@ ssize_t DecodeBytes(v8::Handle<v8::Value> val, enum encoding encoding) {
 ssize_t DecodeWrite(char *buf, size_t buflen,
                     v8::Handle<v8::Value> val,
                     enum encoding encoding) {
-  size_t i;
   HandleScope scope;
 
   // XXX
@@ -232,7 +249,7 @@ ssize_t DecodeWrite(char *buf, size_t buflen,
 
   uint16_t * twobytebuf = new uint16_t[buflen];
 
-  int actual = str->Write(twobytebuf, 0, buflen);
+  int ret = str->Write(twobytebuf, 0, buflen);
 
   for (size_t i = 0; i < buflen; i++) {
     unsigned char *b = reinterpret_cast<unsigned char*>(&twobytebuf[i]);
@@ -242,7 +259,7 @@ ssize_t DecodeWrite(char *buf, size_t buflen,
 
   delete [] twobytebuf;
 
-  return actual;
+  return ret;
 }
 
 static Persistent<FunctionTemplate> stats_constructor_template;
@@ -317,15 +334,15 @@ const char* ToCString(const v8::String::Utf8Value& value) {
   return *value ? *value : "<str conversion failed>";
 }
 
-static void ReportException(TryCatch *try_catch) {
-  Handle<Message> message = try_catch->Message();
+static void ReportException(TryCatch &try_catch, bool show_line = false) {
+  Handle<Message> message = try_catch.Message();
   if (message.IsEmpty()) {
     fprintf(stderr, "Error: (no message)\n");
     fflush(stderr);
     return;
   }
 
-  Handle<Value> error = try_catch->Exception();
+  Handle<Value> error = try_catch.Exception();
   Handle<String> stack;
 
   if (error->IsObject()) {
@@ -334,7 +351,7 @@ static void ReportException(TryCatch *try_catch) {
     if (raw_stack->IsString()) stack = Handle<String>::Cast(raw_stack);
   }
 
-  if (stack.IsEmpty()) {
+  if (show_line) {
     // Print (filename):(line number): (message).
     String::Utf8Value filename(message->GetScriptResourceName());
     const char* filename_string = ToCString(filename);
@@ -354,7 +371,9 @@ static void ReportException(TryCatch *try_catch) {
       fprintf(stderr, "^");
     }
     fprintf(stderr, "\n");
+  }
 
+  if (stack.IsEmpty()) {
     message->PrintCurrentStackTrace(stderr);
   } else {
     String::Utf8Value trace(stack);
@@ -364,20 +383,19 @@ static void ReportException(TryCatch *try_catch) {
 }
 
 // Executes a str within the current v8 context.
-Handle<Value> ExecuteString(v8::Handle<v8::String> source,
-                            v8::Handle<v8::Value> filename) {
+Local<Value> ExecuteString(Local<String> source, Local<Value> filename) {
   HandleScope scope;
   TryCatch try_catch;
 
-  Handle<Script> script = Script::Compile(source, filename);
+  Local<Script> script = Script::Compile(source, filename);
   if (script.IsEmpty()) {
-    ReportException(&try_catch);
+    ReportException(try_catch);
     exit(1);
   }
 
-  Handle<Value> result = script->Run();
+  Local<Value> result = script->Run();
   if (result.IsEmpty()) {
-    ReportException(&try_catch);
+    ReportException(try_catch);
     exit(1);
   }
 
@@ -408,6 +426,7 @@ static Handle<Value> Loop(const Arguments& args) {
 }
 
 static Handle<Value> Unloop(const Arguments& args) {
+  fprintf(stderr, "Node.js Depreciation: Don't use process.unloop(). It will be removed soon.\n");
   HandleScope scope;
   int how = EVUNLOOP_ONE;
   if (args[0]->IsString()) {
@@ -422,15 +441,15 @@ static Handle<Value> Unloop(const Arguments& args) {
 
 static Handle<Value> Chdir(const Arguments& args) {
   HandleScope scope;
-  
+
   if (args.Length() != 1 || !args[0]->IsString()) {
     return ThrowException(Exception::Error(String::New("Bad argument.")));
   }
-  
+
   String::Utf8Value path(args[0]->ToString());
-  
+
   int r = chdir(*path);
-  
+
   if (r != 0) {
     return ThrowException(Exception::Error(String::New(strerror(errno))));
   }
@@ -453,25 +472,121 @@ static Handle<Value> Cwd(const Arguments& args) {
 
 static Handle<Value> Umask(const Arguments& args){
   HandleScope scope;
-
-  if(args.Length() < 1 || !args[0]->IsInt32()) {		
+  unsigned int old;
+  if(args.Length() < 1) {
+    old = umask(0);
+    umask((mode_t)old);
+  }
+  else if(!args[0]->IsInt32()) {
     return ThrowException(Exception::TypeError(
           String::New("argument must be an integer.")));
   }
-  unsigned int mask = args[0]->Uint32Value();
-  unsigned int old = umask((mode_t)mask);
-  
+  else {
+    old = umask((mode_t)args[0]->Uint32Value());
+  }
   return scope.Close(Uint32::New(old));
 }
 
-v8::Handle<v8::Value> Exit(const v8::Arguments& args) {
-  int r = 0;
-  if (args.Length() > 0)
-    r = args[0]->IntegerValue();
-  fflush(stderr);
-  exit(r);
+
+static Handle<Value> GetUid(const Arguments& args) {
+  HandleScope scope;
+  int uid = getuid();
+  return scope.Close(Integer::New(uid));
+}
+
+static Handle<Value> GetGid(const Arguments& args) {
+  HandleScope scope;
+  int gid = getgid();
+  return scope.Close(Integer::New(gid));
+}
+
+
+static Handle<Value> SetGid(const Arguments& args) {
+  HandleScope scope;
+  
+  if (args.Length() < 1) {
+    return ThrowException(Exception::Error(
+	  String::New("setgid requires 1 argument")));
+  }
+
+  Local<Integer> given_gid = args[0]->ToInteger();
+  int gid = given_gid->Int32Value();
+  int result;
+  if ((result = setgid(gid)) != 0) {
+    return ThrowException(Exception::Error(String::New(strerror(errno))));
+  }
   return Undefined();
 }
+
+static Handle<Value> SetUid(const Arguments& args) {
+  HandleScope scope;
+
+  if (args.Length() < 1) {
+    return ThrowException(Exception::Error(
+          String::New("setuid requires 1 argument")));
+  }
+
+  Local<Integer> given_uid = args[0]->ToInteger();
+  int uid = given_uid->Int32Value();
+  int result;
+  if ((result = setuid(uid)) != 0) {
+    return ThrowException(Exception::Error(String::New(strerror(errno))));
+  }
+  return Undefined();
+}
+
+
+v8::Handle<v8::Value> Exit(const v8::Arguments& args) {
+  HandleScope scope;
+  fflush(stderr);
+  Stdio::Flush();
+  exit(args[0]->IntegerValue());
+  return Undefined();
+}
+
+#ifdef __sun
+#define HAVE_GETMEM 1
+#include <unistd.h> /* getpagesize() */
+
+#if (!defined(_LP64)) && (_FILE_OFFSET_BITS - 0 == 64)
+#define PROCFS_FILE_OFFSET_BITS_HACK 1
+#undef _FILE_OFFSET_BITS
+#else
+#define PROCFS_FILE_OFFSET_BITS_HACK 0
+#endif
+
+#include <procfs.h>
+
+#if (PROCFS_FILE_OFFSET_BITS_HACK - 0 == 1)
+#define _FILE_OFFSET_BITS 64
+#endif
+
+int getmem(size_t *rss, size_t *vsize) {
+  pid_t pid = getpid();
+
+  size_t page_size = getpagesize();
+  char pidpath[1024];
+  sprintf(pidpath, "/proc/%d/psinfo", pid);
+
+  psinfo_t psinfo;
+  FILE *f = fopen(pidpath, "r");
+  if (!f) return -1;
+
+  if (fread(&psinfo, sizeof(psinfo_t), 1, f) != 1) {
+    fclose (f);
+    return -1;
+  }
+
+  /* XXX correct? */
+
+  *vsize = (size_t) psinfo.pr_size * page_size;
+  *rss = (size_t) psinfo.pr_rssize * 1024;
+
+  fclose (f);
+
+  return 0;
+}
+#endif
 
 
 #ifdef __FreeBSD__
@@ -521,7 +636,6 @@ error:
 #include <mach/mach_init.h>
 
 int getmem(size_t *rss, size_t *vsize) {
-  task_t task = MACH_PORT_NULL;
   struct task_basic_info t_info;
   mach_msg_type_number_t t_info_count = TASK_BASIC_INFO_COUNT;
 
@@ -542,7 +656,6 @@ int getmem(size_t *rss, size_t *vsize) {
 #ifdef __linux__
 # define HAVE_GETMEM 1
 # include <sys/param.h> /* for MAXPATHLEN */
-# include <sys/user.h> /* for PAGE_SIZE */
 
 int getmem(size_t *rss, size_t *vsize) {
   FILE *f = fopen("/proc/self/stat", "r");
@@ -551,6 +664,7 @@ int getmem(size_t *rss, size_t *vsize) {
   int itmp;
   char ctmp;
   char buffer[MAXPATHLEN];
+  size_t page_size = getpagesize();
 
   /* PID */
   if (fscanf(f, "%d ", &itmp) == 0) goto error;
@@ -603,7 +717,7 @@ int getmem(size_t *rss, size_t *vsize) {
 
   /* Resident set size */
   if (fscanf (f, "%u ", &itmp) == 0) goto error;
-  *rss = (size_t) itmp * PAGE_SIZE;
+  *rss = (size_t) itmp * page_size;
 
   /* rlim */
   if (fscanf (f, "%u ", &itmp) == 0) goto error;
@@ -665,11 +779,11 @@ v8::Handle<v8::Value> MemoryUsage(const v8::Arguments& args) {
 
 v8::Handle<v8::Value> Kill(const v8::Arguments& args) {
   HandleScope scope;
-  
+
   if (args.Length() < 1 || !args[0]->IsNumber()) {
     return ThrowException(Exception::Error(String::New("Bad argument.")));
   }
-  
+
   pid_t pid = args[0]->IntegerValue();
 
   int sig = SIGTERM;
@@ -737,7 +851,7 @@ Handle<Value> DLOpen(const v8::Arguments& args) {
   return Undefined();
 }
 
-v8::Handle<v8::Value> Compile(const v8::Arguments& args) {
+Handle<Value> Compile(const Arguments& args) {
   HandleScope scope;
 
   if (args.Length() < 2) {
@@ -748,11 +862,17 @@ v8::Handle<v8::Value> Compile(const v8::Arguments& args) {
   Local<String> source = args[0]->ToString();
   Local<String> filename = args[1]->ToString();
 
-  Handle<Script> script = Script::Compile(source, filename);
-  if (script.IsEmpty()) return Undefined();
+  TryCatch try_catch;
 
-  Handle<Value> result = script->Run();
-  if (result.IsEmpty()) return Undefined();
+  Local<Script> script = Script::Compile(source, filename);
+  if (try_catch.HasCaught()) {
+    // Hack because I can't get a proper stacktrace on SyntaxError
+    ReportException(try_catch, true);
+    exit(1);
+  }
+
+  Local<Value> result = script->Run();
+  if (try_catch.HasCaught()) return try_catch.ReThrow();
 
   return scope.Close(result);
 }
@@ -773,7 +893,7 @@ void FatalException(TryCatch &try_catch) {
 
   // Check if uncaught_exception_counter indicates a recursion
   if (uncaught_exception_counter > 0) {
-    ReportException(&try_catch);
+    ReportException(try_catch);
     exit(1);
   }
 
@@ -799,7 +919,7 @@ void FatalException(TryCatch &try_catch) {
   uint32_t length = listener_array->Length();
   // Report and exit if process has no "uncaughtException" listener
   if (length == 0) {
-    ReportException(&try_catch);
+    ReportException(try_catch);
     exit(1);
   }
 
@@ -820,13 +940,13 @@ void FatalException(TryCatch &try_catch) {
 
 
 static ev_async debug_watcher;
+volatile static bool debugger_msg_pending = false;
 
 static void DebugMessageCallback(EV_P_ ev_async *watcher, int revents) {
   HandleScope scope;
   assert(watcher == &debug_watcher);
   assert(revents == EV_ASYNC);
-  ExecuteString(String::New("1+1;"),
-                String::New("debug_poll"));
+  Debug::ProcessDebugMessages();
 }
 
 static void DebugMessageDispatch(void) {
@@ -835,23 +955,47 @@ static void DebugMessageDispatch(void) {
 
   // Send a signal to our main thread saying that it should enter V8 to
   // handle the message.
+  debugger_msg_pending = true;
   ev_async_send(EV_DEFAULT_UC_ &debug_watcher);
 }
 
-
-static Handle<Value> ExecuteNativeJS(const char *filename, const char *data) {
+static Handle<Value> CheckBreak(const Arguments& args) {
   HandleScope scope;
-  TryCatch try_catch;
-  Handle<Value> result = ExecuteString(String::New(data), String::New(filename));
-  // There should not be any syntax errors in these file!
-  // If there are exit the process.
-  if (try_catch.HasCaught())  {
-    puts("There is an error in Node's built-in javascript");
-    puts("This should be reported as a bug!");
-    ReportException(&try_catch);
-    exit(1);
+
+  // TODO FIXME This function is a hack to wait until V8 is ready to accept
+  // commands. There seems to be a bug in EnableAgent( _ , _ , true) which
+  // makes it unusable here. Ideally we'd be able to bind EnableAgent and
+  // get it to halt until Eclipse connects.
+
+  if (!debug_wait_connect)
+    return Undefined();
+
+  printf("Waiting for remote debugger connection...\n");
+
+  const int halfSecond = 50;
+  const int tenMs=10000;
+  debugger_msg_pending = false;
+  for (;;) {
+    if (debugger_msg_pending) {
+      Debug::DebugBreak();
+      Debug::ProcessDebugMessages();
+      debugger_msg_pending = false;
+
+      // wait for 500 msec of silence from remote debugger
+      int cnt = halfSecond;
+        while (cnt --) {
+        debugger_msg_pending = false;
+        usleep(tenMs);
+        if (debugger_msg_pending) {
+          debugger_msg_pending = false;
+          cnt = halfSecond;
+        }
+      }
+      break;
+    }
+    usleep(tenMs);
   }
-  return scope.Close(result);
+  return Undefined();
 }
 
 static Handle<Value> Write(const Arguments& args) {
@@ -879,19 +1023,6 @@ static Local<Object> Load(int argc, char *argv[]) {
 
   Local<Object> global = Context::GetCurrent()->Global();
 
-  Handle<Object> modules = Object::New();
-
-  Handle<Object> module_system = Object::New();
-  modules->Set(String::NewSymbol("system"), module_system);
-
-  Handle<Object> module_node_buffer = Object::New();
-  Buffer::Initialize(module_node_buffer);
-  modules->Set(String::NewSymbol("node/buffer-embedding"), module_node_buffer);
-
-  Handle<Object> module_node_encodings = Object::New();
-  Transcoder::Initialize(module_node_encodings);
-  modules->Set(String::NewSymbol("node/encodings"), module_node_encodings);
-
   Local<FunctionTemplate> process_template = FunctionTemplate::New();
   node::EventEmitter::Initialize(process_template);
 
@@ -907,18 +1038,19 @@ static Local<Object> Load(int argc, char *argv[]) {
 #define str(s) #s
   process->Set(String::NewSymbol("platform"), String::New(xstr(PLATFORM)));
 
-  // process.ARGV
+  // process.argv
   int i, j;
-  Local<Array> arguments = Array::New(argc - dash_dash_index + 1);
+  Local<Array> arguments = Array::New(argc - option_end_index + 1);
   arguments->Set(Integer::New(0), String::New(argv[0]));
-  for (j = 1, i = dash_dash_index + 1; i < argc; j++, i++) {
+  for (j = 1, i = option_end_index + 1; i < argc; j++, i++) {
     Local<String> arg = String::New(argv[i]);
     arguments->Set(Integer::New(j), arg);
   }
+  // assign it
   process->Set(String::NewSymbol("ARGV"), arguments);
-  module_system->Set(String::NewSymbol("args"), arguments);
+  process->Set(String::NewSymbol("argv"), arguments);
 
-  // create process.ENV
+  // create process.env
   Local<Object> env = Object::New();
   for (i = 0; environ[i]; i++) {
     // skip entries without a '=' character
@@ -934,23 +1066,31 @@ static Local<Object> Load(int argc, char *argv[]) {
   }
   // assign process.ENV
   process->Set(String::NewSymbol("ENV"), env);
+  process->Set(String::NewSymbol("env"), env);
+
   process->Set(String::NewSymbol("pid"), Integer::New(getpid()));
-  module_system->Set(String::NewSymbol("env"), env);
 
   // define various internal methods
-  NODE_SET_METHOD(process, "print", Print);
   NODE_SET_METHOD(process, "loop", Loop);
   NODE_SET_METHOD(process, "unloop", Unloop);
   NODE_SET_METHOD(process, "compile", Compile);
-  NODE_SET_METHOD(module_system, "compile", Compile);
   NODE_SET_METHOD(process, "_byteLength", ByteLength);
   NODE_SET_METHOD(process, "reallyExit", Exit);
   NODE_SET_METHOD(process, "chdir", Chdir);
   NODE_SET_METHOD(process, "cwd", Cwd);
+  NODE_SET_METHOD(process, "getuid", GetUid);
+  NODE_SET_METHOD(process, "setuid", SetUid);
+
+  NODE_SET_METHOD(process, "setgid", SetGid);
+  NODE_SET_METHOD(process, "getgid", GetGid);
+
   NODE_SET_METHOD(process, "umask", Umask);
   NODE_SET_METHOD(process, "dlopen", DLOpen);
   NODE_SET_METHOD(process, "kill", Kill);
   NODE_SET_METHOD(process, "memoryUsage", MemoryUsage);
+  NODE_SET_METHOD(process, "checkBreak", CheckBreak);
+
+  NODE_SET_METHOD(process, "print", Print);
   NODE_SET_METHOD(process, "write", Write);
 
   // Assign the EventEmitter. It was created in main().
@@ -965,6 +1105,8 @@ static Local<Object> Load(int argc, char *argv[]) {
 
 
   // Initialize the C++ modules..................filename of module
+  IdleWatcher::Initialize(process);            // idle_watcher.cc
+  // XXX causes problems with termios
   //Stdio::Initialize(process);                  // stdio.cc
   Timer::Initialize(process);                  // timer.cc
   SignalHandler::Initialize(process);          // signal_handler.cc
@@ -974,17 +1116,14 @@ static Local<Object> Load(int argc, char *argv[]) {
   // Create node.dns
   Local<Object> dns = Object::New();
   process->Set(String::NewSymbol("dns"), dns);
-  modules->Set(String::NewSymbol("node/dns"), dns);
   DNS::Initialize(dns);                         // dns.cc
   Local<Object> fs = Object::New();
   process->Set(String::NewSymbol("fs"), fs);
-  modules->Set(String::NewSymbol("node/fs"), fs);
   File::Initialize(fs);                         // file.cc
   // Create node.tcp. Note this separate from lib/tcp.js which is the public
   // frontend.
   Local<Object> tcp = Object::New();
   process->Set(String::New("tcp"), tcp);
-  modules->Set(String::NewSymbol("node/tcp"), tcp);
   Server::Initialize(tcp);                      // tcp.cc
   Connection::Initialize(tcp);                  // tcp.cc
   // Create node.http.  Note this separate from lib/http.js which is the
@@ -993,25 +1132,95 @@ static Local<Object> Load(int argc, char *argv[]) {
   process->Set(String::New("http"), http);
   HTTPServer::Initialize(http);                 // http.cc
   HTTPConnection::Initialize(http);             // http.cc
-  modules->Set(String::New("node/http"), http);
 
-  modules->Set(String::New("node/process"), process);
+  Handle<Object> modules = Object::New();
 
-  Handle<Function> bootstrap = Handle<Function>::Cast(ExecuteNativeJS(
-    "narwhal/bootstrap.js",
-    native_bootstrap
-  ));
-  Handle<Value> bootstrap_args[1] = {modules};
-  bootstrap->Call(global, 1, bootstrap_args);
+  Handle<Object> module_system = Object::New();
+  modules->Set(String::NewSymbol("system"), module_system);
+  module_system->Set(String::NewSymbol("args"), arguments);
+  module_system->Set(String::NewSymbol("env"), env);
+  NODE_SET_METHOD(module_system, "compile", Compile);
+
+  Handle<Object> module_node_buffer = Object::New();
+  Buffer::Initialize(module_node_buffer);
+  modules->Set(String::NewSymbol("node/buffer-embedding"), module_node_buffer);
+
+  Handle<Object> module_node_encodings = Object::New();
+  Transcoder::Initialize(module_node_encodings);
+  modules->Set(String::NewSymbol("node/encodings"), module_node_encodings);
+
+  modules->Set(String::NewSymbol("node/dns-embedding"), dns);
+  modules->Set(String::NewSymbol("node/fs-embeddding"), fs);
+  modules->Set(String::NewSymbol("node/tcp-embedding"), tcp);
+  modules->Set(String::NewSymbol("node/http-embedding"), http);
+  modules->Set(String::NewSymbol("node/process"), process);
+
+#ifndef NDEBUG
+  TryCatch try_catch;
+#endif
+
+  Local<Value> f_value = ExecuteString(String::New(native_bootstrap),
+                                       String::New("narwhal/bootstrap.js"));
+#ifndef NDEBUG
+  if (try_catch.HasCaught())  {
+    ReportException(try_catch);
+    exit(10);
+  }
+#endif
+  assert(f_value->IsFunction());
+  Local<Function> f = Local<Function>::Cast(f_value);
+
+  Local<Value> args[1] = { Local<Value>::New(modules) };
+
+  f->Call(global, 1, args);
+
+#ifndef NDEBUG
+  if (try_catch.HasCaught())  {
+    ReportException(try_catch);
+    exit(11);
+  }
+#endif
+}
+
+static void PrintHelp();
+
+static void ParseDebugOpt(const char* arg) {
+  const char *p = 0;
+
+  use_debug_agent = true;
+  if (!strcmp (arg, "--debug-brk")) {
+    debug_wait_connect = true;
+    return;
+  } else if (!strcmp(arg, "--debug")) {
+    return;
+  } else if (strstr(arg, "--debug-brk=") == arg) {
+    debug_wait_connect = true;
+    p = 1 + strchr(arg, '=');
+    debug_port = atoi(p);
+  } else if (strstr(arg, "--debug=") == arg) {
+    p = 1 + strchr(arg, '=');
+    debug_port = atoi(p);
+  }
+  if (p && debug_port > 1024 && debug_port <  65536)
+      return;
+
+  fprintf(stderr, "Bad debug option.\n");
+  if (p) fprintf(stderr, "Debug port must be in range 1025 to 65535.\n");
+
+  PrintHelp();
+  exit(1);
 }
 
 static void PrintHelp() {
-  printf("Usage: node [options] [--] script.js [arguments] \n"
-         "  -v, --version    print node's version\n"
-         "  --debug          enable remote debugging\n" // TODO specify port
-         "  --cflags         print pre-processor and compiler flags\n"
-         "  --v8-options     print v8 command line options\n\n"
-         "Documentation can be found at http://tinyclouds.org/node/api.html"
+  printf("Usage: node [options] script.js [arguments] \n"
+         "  -v, --version      print node's version\n"
+         "  --debug[=port]     enable remote debugging via given TCP port\n"
+         "                     without stopping the execution\n"
+         "  --debug-brk[=port] as above, but break in script.js and\n"
+         "                     wait for remote debugger to connect\n"
+         "  --cflags           print pre-processor and compiler flags\n"
+         "  --v8-options       print v8 command line options\n\n"
+         "Documentation can be found at http://nodejs.org/api.html"
          " or with 'man node'\n");
 }
 
@@ -1020,14 +1229,10 @@ static void ParseArgs(int *argc, char **argv) {
   // TODO use parse opts
   for (int i = 1; i < *argc; i++) {
     const char *arg = argv[i];
-    if (strcmp(arg, "--") == 0) {
-      dash_dash_index = i;
-      break;
-    } else if (strcmp(arg, "--debug") == 0) {
-      argv[i] = (char*)(malloc(1));
-      argv[i][0] = '\0';
-      use_debug_agent = true;
-      dash_dash_index = i;
+    if (strstr(arg, "--debug") == arg) {
+      ParseDebugOpt(arg);
+      argv[i] = const_cast<char*>("");
+      option_end_index = i;
     } else if (strcmp(arg, "--version") == 0 || strcmp(arg, "-v") == 0) {
       printf("%s\n", NODE_VERSION);
       exit(0);
@@ -1038,9 +1243,11 @@ static void ParseArgs(int *argc, char **argv) {
       PrintHelp();
       exit(0);
     } else if (strcmp(arg, "--v8-options") == 0) {
-      argv[i] = (char *)(malloc(strlen("--help") + 1));
-      strcpy(argv[i], "--help");
-      dash_dash_index = i+1;
+      argv[i] = const_cast<char*>("--help");
+      option_end_index = i+1;
+    } else if (argv[i][0] != '-') {
+      option_end_index = i-1;
+      break;
     }
   }
 }
@@ -1050,16 +1257,34 @@ static void ParseArgs(int *argc, char **argv) {
 
 int main(int argc, char *argv[]) {
   // Parse a few arguments which are specific to Node.
-  node::ParseArgs(&argc, argv);
-  // Parse the rest of the args (up to the 'dash_dash_index' (where '--' was
+  //node::ParseArgs(&argc, argv);
+  // Parse the rest of the args (up to the 'option_end_index' (where '--' was
   // in the command line))
-  V8::SetFlagsFromCommandLine(&node::dash_dash_index, argv, false);
+  //V8::SetFlagsFromCommandLine(&node::option_end_index, argv, false);
 
   // Ignore the SIGPIPE
   evcom_ignore_sigpipe();
 
   // Initialize the default ev loop.
+#ifdef __sun
+  // TODO(Ryan) I'm experiencing abnormally high load using Solaris's
+  // EVBACKEND_PORT. Temporarally forcing select() until I debug.
+  ev_default_loop(EVBACKEND_SELECT);
+#else
   ev_default_loop(EVFLAG_AUTO);
+#endif
+
+
+  ev_timer_init(&node::gc_timer, node::GCTimeout, GC_INTERVAL, GC_INTERVAL);
+  // Set the gc_timer to max priority so that it runs before all other
+  // watchers. In this way it can check if the 'tick' has other pending
+  // watchers by using ev_pending_count() - if it ran with lower priority
+  // then the other watchers might run before it - not giving us good idea
+  // of loop idleness.
+  ev_set_priority(&node::gc_timer, EV_MAXPRI);
+  ev_timer_start(EV_DEFAULT_UC_ &node::gc_timer);
+  ev_unref(EV_DEFAULT_UC);
+
 
   // Setup the EIO thread pool
   { // It requires 3, yes 3, watchers.
@@ -1084,18 +1309,15 @@ int main(int argc, char *argv[]) {
 
   V8::SetFatalErrorHandler(node::OnFatalError);
 
-#define AUTO_BREAK_FLAG "--debugger_auto_break"
   // If the --debug flag was specified then initialize the debug thread.
   if (node::use_debug_agent) {
-    // First apply --debugger_auto_break setting to V8. This is so we can
-    // enter V8 by just executing any bit of javascript
-    V8::SetFlagsFromString(AUTO_BREAK_FLAG, sizeof(AUTO_BREAK_FLAG));
     // Initialize the async watcher for receiving messages from the debug
     // thread and marshal it into the main thread. DebugMessageCallback()
     // is called from the main thread to execute a random bit of javascript
     // - which will give V8 control so it can handle whatever new message
     // had been received on the debug thread.
     ev_async_init(&node::debug_watcher, node::DebugMessageCallback);
+    ev_set_priority(&node::debug_watcher, EV_MAXPRI);
     // Set the callback DebugMessageDispatch which is called from the debug
     // thread.
     Debug::SetDebugMessageDispatchHandler(node::DebugMessageDispatch);
@@ -1105,12 +1327,12 @@ int main(int argc, char *argv[]) {
     ev_unref(EV_DEFAULT_UC);
 
     // Start the debug thread and it's associated TCP server on port 5858.
-    bool r = Debug::EnableAgent("node " NODE_VERSION, 5858);
+    bool r = Debug::EnableAgent("node " NODE_VERSION, node::debug_port);
+
     // Crappy check that everything went well. FIXME
     assert(r);
-    // Print out some information. REMOVEME
-    printf("debugger listening on port 5858\n"
-           "Use 'd8 --remote_debugger' to access it.\n");
+    // Print out some information.
+    printf("debugger listening on port %d\n", node::debug_port);
   }
 
   // Create the one and only Context.
@@ -1120,6 +1342,8 @@ int main(int argc, char *argv[]) {
   // Create all the objects, load modules, do everything.
   // so your next reading stop should be node::Load()!
   node::Load(argc, argv);
+
+  node::Stdio::Flush();
 
 #ifndef NDEBUG
   // Clean up.

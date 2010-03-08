@@ -3,7 +3,8 @@
 // -- kriskowal Kris Kowal Copyright (C) 2009-2010 MIT License
 
 var BINARY = require("binary");
-var nodeFs = require("node/fs");
+var NODE_FS = require("node/process").fs;
+var TRANSCODE = require("transcode");
 var Buffer = require("node/buffer").Buffer;
 
 var IO = exports.IO = function(inputStream, outputStream) {
@@ -76,115 +77,30 @@ exports.ByteStream = function (fd) {
                 max = max || 1024;
                 var binary = new BINARY.ByteArray(max);
                 var buffer = binary._bytes;
-                var actual = nodeFs.readInto(fd, buffer, 0, max, 0);
+                var actual = NODE_FS.readInto(fd, buffer, 0, max, 0);
                 return binary.slice(0, actual).toByteString();
             }
         },
         "readInto": function (buffer, start, stop) {
-            return nodeFs.readInto(fd, buffer._bytes || buffer, start, stop, 0);
+            return NODE_FS.readInto(fd, buffer._bytes || buffer, start, stop, 0);
         },
         "write": function (binary, start, stop) {
             while (start < stop) {
-                start += nodeFs.writeFrom(fd, binary._bytes || buffer, start, stop, 0);
+                start += NODE_FS.writeFrom(fd, binary._bytes || buffer, start, stop, 0);
             }
         },
         "flush": function () {
-            //nodeFs.flush(fd);
+            //NODE_FS.flush(fd);
         },
         "close": function () {
-            nodeFs.close(fd);
+            NODE_FS.close(fd);
         }
     };
 };
 
 exports.TextInputStream = function (raw, lineBuffering, buffering, charset, options) {
-
-    var chars = "";
-    var length = 1024;
-    var bytes = new Buffer(length);
-    var end = 0;
-
-    var self = this;
-
-    self.raw = raw;
-
-    self.readLine = function () {
-        var pos;
-        do {
-            if ((pos = chars.indexOf("\n")) >= 0) {
-                var result = chars.slice(0, pos + 1);
-                chars = chars.slice(pos + 1);
-                return result;
-            }
-            if (end === length) {
-                var oldBytes = bytes;
-                bytes = new Buffer(length *= 2);
-                bytes.copyFrom(oldBytes);
-            }
-            var actual = raw.readInto(bytes, end, length);
-            end += actual;
-            if (actual > 0) {
-                try {
-                    chars = chars + bytes.range(0, end).toString(charset);
-                    bytes.range(end).copy(bytes);
-                    end = 0;
-                } catch (exception) {
-                    print(exception);
-                    throw new Error("cannot handle broken byte sequences yet" + bytes.range(0, end).toSource());
-                }
-            }
-        } while (actual > 0);
-        return chars;
-    };
-
-    self.next = function () {
-        return self.readLine().replace(/\n$/, '');
-    };
-
-    self.iterator = function () {
-        return self;
-    };
-
-    self.forEach = function (block, context) {
-        var line;
-        while (true) {
-            try {
-                line = self.next();
-            } catch (exception) {
-                break;
-            }
-            block.call(context, line);
-        }
-    };
-
-    self.readLines = function () {
-        var lines = [];
-        do {
-            var line = self.readLine();
-            if (line.length)
-                lines.push(line);
-        } while (line.length);
-        return lines;
-    };
-
-    self.read = function () {
-        return self.readLines().join('');
-    };
-
-    self.copy = function (output, mode, options) {
-        do {
-            var line = self.readLine();
-            output.write(line).flush();
-        } while (line.length);
-        return self;
-    };
-
-    self.close = function () {
-        raw.close();
-    };
-
-    return Object.create(self);
-};
+    return new TRANSCODE.EncoderReader(raw, charset || "UTF-8");
+}
 
 exports.TextOutputStream = function (raw, lineBuffering, buffering, charset, options) {
 
@@ -229,11 +145,11 @@ exports.TextOutputStream = function (raw, lineBuffering, buffering, charset, opt
 
 exports.TextIOWrapper = function (raw, mode, lineBuffering, buffering, charset, options) {
     if (mode.update) {
-        return new exports.TextIOStream(raw, lineBuffering, buffering, charset, options);
+        throw new Error("update IO NYI");
     } else if (mode.write || mode.append) {
-        return new exports.TextOutputStream(raw, lineBuffering, buffering, charset, options);
+        throw new Error("write/append IO NYI");
     } else if (mode.read) {
-        return new exports.TextInputStream(raw, lineBuffering, buffering, charset, options);
+        return TRANSCODE.EncoderReader(raw, charset || "UTF-8");
     } else {
         throw new Error("file must be opened for read, write, or append mode.");
     }

@@ -98,10 +98,54 @@ Handle<Value> Transcoder::Transcode(const Arguments &args) {
     */
   Buffer *target = ObjectWrap::Unwrap<Buffer>(args[1]->ToObject());
 
-  char *source_data = source->data();
-  char *target_data = target->data();
-  size_t source_capacity = source->length();
-  size_t target_capacity = target->length();
+  // source start
+  size_t source_start;
+  if (args[2]->IsInt32()) {
+    source_start = args[2]->Int32Value();
+    if (source_start < 0 || source_start > source->length()) {
+      return ThrowException(String::New("transcode() sourceStart out of bounds"));
+    }
+  } else {
+    source_start = 0;
+  }
+
+  // source stop
+  size_t source_stop;
+  if (args[3]->IsInt32()) {
+    source_stop = args[3]->Int32Value();
+    if (source_stop < 0 || source_stop > source->length()) {
+      return ThrowException(String::New("transcode() sourceStop out of bounds"));
+    }
+  } else {
+    source_stop = source->length();
+  }
+
+  // target start
+  size_t target_start;
+  if (args[4]->IsInt32()) {
+    target_start = args[4]->Int32Value();
+    if (target_start < 0 || target_start > target->length()) {
+      return ThrowException(String::New("transcode() targetStart out of bounds"));
+    }
+  } else {
+    target_start = 0;
+  }
+
+  // target stop
+  size_t target_stop;
+  if (args[5]->IsInt32()) {
+    target_stop = args[5]->Int32Value();
+    if (target_stop < 0 || target_stop > target->length()) {
+      return ThrowException(String::New("transcode() targetStop out of bounds"));
+    }
+  } else {
+    target_stop = target->length();
+  }
+
+  char *source_data = source->data() + source_start;
+  char *target_data = target->data() + target_start;
+  size_t source_capacity = source_stop - source_start;
+  size_t target_capacity = target_stop - target_start;
 
   size_t converted = iconv(
     descriptor,
@@ -128,18 +172,18 @@ Handle<Value> Transcoder::Transcode(const Arguments &args) {
     }
   }
 
-  Local<Array> result = Array::New(4);
-  result->Set(Integer::New(0), Integer::NewFromUnsigned(
-      source->length() - source_capacity
+  Local<Object> result = Object::New();
+  result->Set(String::New("source"), Integer::NewFromUnsigned(
+      source_stop - source_capacity
   )); // source
-  result->Set(Integer::New(1), Integer::NewFromUnsigned(
-      target->length() - target_capacity
+  result->Set(String::New("target"), Integer::NewFromUnsigned(
+      target_stop - target_capacity
   )); // target
-  result->Set(Integer::New(2), Integer::NewFromUnsigned(
+  result->Set(String::New("converted"), Integer::NewFromUnsigned(
       converted
   )); // converted
   if (error)
-    result->Set(Integer::New(3), String::New(error)); // error
+    result->Set(String::New("error"), String::New(error)); // error
 
   return scope.Close(result);
 }

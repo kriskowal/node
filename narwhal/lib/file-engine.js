@@ -1,25 +1,24 @@
 
 // -- kriskowal Kris Kowal Copyright (C) 2009-2010 MIT License
-// -- cadorn Christoph Dorn
+// -- cadorn Christoph Dorn TODO
 
 var exports = require('./file');
-var nodeFs = require("node/fs");
-var nodeProcess = require("node/process")
-var io = require("./io");
+var EMBEDDING = require("node/process").fs;
+var PROCESS = require("node/process")
+var IO = require("./io");
 
 exports.SEPARATOR = '/';
 
 exports.cwd = function () {
-    return nodeProcess.cwd();
+    return PROCESS.cwd();
 };
 
-// TODO necessary for package loading
 exports.list = function (path) {
-    throw Error("list not yet implemented.");
+    return EMBEDDING.readdir(String(path));
 };
 
 exports.canonical = function (path) {
-    var paths = [exports.cwd(), path];
+    var paths = [exports.cwd(), String(path)];
     var outs = [];
     var prev;
     for (var i = 0, ii = paths.length; i < ii; i++) {
@@ -40,7 +39,7 @@ exports.canonical = function (path) {
             prev = consider;
 
             try {
-                var link = nodeFs.readlink(consider);
+                var link = EMBEDDING.readlink(consider);
             } catch (exception) {
                 link = undefined;
             }
@@ -54,18 +53,9 @@ exports.canonical = function (path) {
     return exports.join.apply(undefined, outs);
 };
 
-exports.exists = function (path) {
-    try {
-        nodeFs.stat(String(path));
-        return true;
-    } catch (exception) {
-        return false;
-    }
-};
-
 // TODO necessary for lazy module reloading in sandboxes
 exports.mtime = function (path) {
-    return nodeFs.stat(String(path)).mtime;
+    return EMBEDDING.stat(String(path)).mtime;
 };
 
 exports.size = function (path) {
@@ -73,40 +63,45 @@ exports.size = function (path) {
 };
 
 exports.stat = function (path) {
-    var stat = nodeFs.stat(String(path));
+    var stat = EMBEDDING.stat(String(path));
     return {
         mtime: stat.mtime
     }
 };
 
-// TODO necessary for package loading
-exports.isDirectory = function (path) {
+exports.exists = function (path) {
     try {
-        var stat = nodeFs.stat(String(path));
+        EMBEDDING.stat(String(path));
+        return true;
     } catch (exception) {
         return false;
     }
-    return stat.mode & nodeProcess.S_ISDIR;
 };
 
-// TODO necessary for module loading
-// exports.isFile = function (path) {
-    //throw Error("isFile not yet implemented.");
-//};
+function statIs(flag) {
+    return function (path) {
+        try {
+            var stat = EMBEDDING.stat(String(path));
+        } catch (exception) {
+            return false;
+        }
+        return Boolean(stat.mode & flag);
+    };
+}
 
-// XXX remove this if you implement isFile here
-// from bootstrap system object:
-/*
-exports.isFile = system.fs.isFile;
-*/
-
-/*
-exports.isFile = system.fs.isFile; // TEMPORARY HACK
-*/
-
-exports.isLink = function (path) {
-    throw Error("isLink not yet implemented.");
-};
+// TODO necessary for package loading
+exports.isDirectory = statIs(PROCESS.S_IFDIR);
+exports.isFile = statIs(PROCESS.S_IFREG);
+// XXX to change to isSymbolicLink in FS/A/0
+exports.isLink = statIs(PROCESS.S_IFLNK);
+// XXX beyond spec
+exports.isBlockDevice = statIs(PROCESS.S_IFBLK);
+// XXX beyond spec
+exports.isCharacterDevice = statIs(PROCESS.S_IFCHR);
+// XXX beyond spec
+exports.isFifo = statIs(PROCESS.S_IFIFO);
+// XXX beyond spec
+exports.isSocket = statIs(PROCESS.S_IFSOCK);
 
 exports.isReadable = function (path) {
     throw Error("isReadable not yet implemented.");
@@ -140,32 +135,30 @@ exports.touch = function (path, mtime) {
     throw Error("touch not yet implemented.");
 };
 
-// FIXME temporary hack
-/*
-var read = system.fs.read; // from bootstrap system object
-*/
-
 exports.FileIO = function (path, mode, permissions) {
-    mode = exports.mode(mode);
-    var read = mode.read,
-        write = mode.write,
-        append = mode.append,
-        update = mode.update;
+    var flags = exports.flags(mode);
+    permissions = permissions || 0644; // XXX umask
+    return IO.ByteStream(EMBEDDING.open(path, flags, permissions));
+};
 
-    var flags = 0;
+exports.flags = function (mode) {
+    if (mode.read)
+        return flags["r"];
+    if (mode.write)
+        return flags["w"];
+    if (mode.update)
+        return flags["w+"];
+    if (mode.append)
+        return flags["a"];
+    throw new Error("Unknown file open mode: " + mode);
+};
 
-    if (update) {
-        flags = nodeProcess.O_RDWR;
-    } else if (write) {
-        flags = nodeProcess.O_WRONLY;
-    } else if (append) {
-        flags = nodeProcess.O_WRONLY | nodeProcess.O_APPEND;
-    } else if (read) {
-        flags = nodeProcess.O_RDONLY;
-    } else {
-        throw new Error("Files must be opened either for read, write, or update mode.");
-    }
-
-    return io.ByteStream(nodeFs.open(path, flags, 0644));
+var flags = {
+    "r": PROCESS.O_RDONLY,
+    "r+": PROCESS.O_RDWR,
+    "w": PROCESS.O_CREAT | PROCESS.O_TRUNC | PROCESS.O_WRONLY,
+    "w+": PROCESS.O_CREAT | PROCESS.O_TRUNC | PROCESS.O_RDWR,
+    "a": PROCESS.O_APPEND | PROCESS.O_CREAT | PROCESS.O_WRONLY, 
+    "a+": PROCESS.O_APPEND | PROCESS.O_CREAT | PROCESS.O_RDWR
 };
 

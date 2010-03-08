@@ -10,8 +10,8 @@
 
     function main () {
         try {
-            var text = fs.read(system.prefix + "/narwhal.js");
-            var factory = process.compile(text, "narwhal.js", 1);
+            var text = FS.read(SYSTEM.prefix + "/narwhal.js");
+            var factory = PROCESS.compile(text, "narwhal.js", 1);
             factory(modules);
         } catch (exception) {
             if (exception instanceof Error) {
@@ -49,11 +49,20 @@
                 for (var name in inject)
                     if (Object.prototype.hasOwnProperty.call(inject, name))
                         names.push(name);
-                return exports.compile(
-                    Array(lineNo).join("\n") +
-                    "(function(" + names.join(",") + "){" + text + "\n})",
-                    fileName
-                ).apply(null, names.map(function (name) {
+                var factory;
+                try {
+                    factory = exports.compile(
+                        Array(lineNo).join("\n") +
+                        "(function(" + names.join(",") + "){" + text + "\n})",
+                        fileName
+                    );
+                } catch (exception) {
+                    throw new Error(
+                        exception + " while compliling " +
+                        fileName + ":" + lineNo
+                    );
+                }
+                factory.apply(null, names.map(function (name) {
                     return inject[name];
                 }));
             };
@@ -61,9 +70,13 @@
         };
 
         exports.print = function () {
-            modules['node/process'].print(
-                Array.prototype.join.call(arguments, " ") + "\n"
-            );
+            if (exports.stdout) {
+                return exports.stdout.print.apply(exports.stdout, arguments);
+            } else {
+                modules['node/process'].write(
+                    Array.prototype.join.call(arguments, " ") + "\n"
+                );
+            }
             return exports;
         };
 
@@ -71,12 +84,12 @@
 
     // module "file"
     (function (exports) {
-        var k = modules['node/process'];
-        var fs = modules['node/fs'];
+        var K = modules['node/process'];
+        var NODE_FS = modules['node/process'].fs;
 
         exports.isFile = function (path) {
             try {
-                return (fs.stat(path).mode & k.S_IFREG) === k.S_IFREG;
+                return (NODE_FS.stat(path).mode & K.S_IFREG) === K.S_IFREG;
             } catch (e) {
                 return false;
             }
@@ -84,15 +97,15 @@
 
         exports.read = function (path) {
             try {
-                var fd = fs.open(path, k.O_RDONLY, 0666);
+                var fd = NODE_FS.open(path, K.O_RDONLY, 0666);
             } catch (exception) {
-                throw new Error("Failed to open " + path);
+                throw new Error("Failed to open " + path + ": " + exception);
             }
             try {
                 var chunks = [];
                 var pos = 0;
                 do {
-                    var chunkPair = fs.read(fd, 1024, pos, "utf8");
+                    var chunkPair = NODE_FS.read(fd, 1024, pos, "utf8");
                     var chunk = chunkPair[0];
                     if (chunk === null)
                         chunk = "";
@@ -101,16 +114,19 @@
                 } while (chunk.length);
                 return chunks.join("");
             } finally {
-                fs.close(fd);
+                NODE_FS.close(fd);
             }
         };
 
     })(modules.file = {});
 
-    var process = modules['node/process'];
-    var fs = modules['file'];
-    var system = modules['system'];
+    var PROCESS = modules['node/process'];
+    var FS = modules['file'];
+    var SYSTEM = modules['system'];
 
     main();
+
+    PROCESS.loop();
+    PROCESS.emit("exit");
 
 })
