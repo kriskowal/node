@@ -333,11 +333,6 @@ const char* ToCString(const v8::String::Utf8Value& value) {
 
 static void ReportException(TryCatch &try_catch, bool show_line = false) {
   Handle<Message> message = try_catch.Message();
-  if (message.IsEmpty()) {
-    fprintf(stderr, "Error: (no message)\n");
-    fflush(stderr);
-    return;
-  }
 
   Handle<Value> error = try_catch.Exception();
   Handle<String> stack;
@@ -348,7 +343,7 @@ static void ReportException(TryCatch &try_catch, bool show_line = false) {
     if (raw_stack->IsString()) stack = Handle<String>::Cast(raw_stack);
   }
 
-  if (show_line) {
+  if (show_line && !message.IsEmpty()) {
     // Print (filename):(line number): (message).
     String::Utf8Value filename(message->GetScriptResourceName());
     const char* filename_string = ToCString(filename);
@@ -423,7 +418,7 @@ static Handle<Value> Loop(const Arguments& args) {
 }
 
 static Handle<Value> Unloop(const Arguments& args) {
-  fprintf(stderr, "Node.js Depreciation: Don't use process.unloop(). It will be removed soon.\n");
+  fprintf(stderr, "Deprecation: Don't use process.unloop(). It will be removed soon.\n");
   HandleScope scope;
   int how = EVUNLOOP_ONE;
   if (args[0]->IsString()) {
@@ -600,6 +595,7 @@ int getmem(size_t *rss, size_t *vsize) {
   struct kinfo_proc *kinfo = NULL;
   pid_t pid;
   int nprocs;
+  size_t page_size = getpagesize();
 
   pid = getpid();
 
@@ -609,7 +605,7 @@ int getmem(size_t *rss, size_t *vsize) {
   kinfo = kvm_getprocs(kd, KERN_PROC_PID, pid, &nprocs);
   if (kinfo == NULL) goto error;
 
-  *rss = kinfo->ki_rssize * PAGE_SIZE;
+  *rss = kinfo->ki_rssize * page_size;
   *vsize = kinfo->ki_size;
 
   kvm_close(kd);
@@ -848,6 +844,53 @@ Handle<Value> DLOpen(const v8::Arguments& args) {
   return Undefined();
 }
 
+// evalcx(code, sandbox={})
+// Executes code in a new context
+Handle<Value> EvalCX(const Arguments& args) {
+  HandleScope scope;
+
+  Local<String> code = args[0]->ToString();
+  Local<Object> sandbox = args.Length() > 1 ? args[1]->ToObject()
+                                            : Object::New();
+  // Create the new context
+  Persistent<Context> context = Context::New();
+
+  // Copy objects from global context, to our brand new context
+  Handle<Array> keys = sandbox->GetPropertyNames();
+
+  int i;
+  for (i = 0; i < keys->Length(); i++) {
+    Handle<String> key = keys->Get(Integer::New(i))->ToString();
+    Handle<Value> value = sandbox->Get(key);
+    context->Global()->Set(key, value->ToObject()->Clone());
+  }
+
+  // Enter and compile script
+  context->Enter();
+
+  // Catch errors
+  TryCatch try_catch;
+
+  Local<Script> script = Script::Compile(code, String::New("evalcx"));
+  Handle<Value> result;
+
+  if (script.IsEmpty()) {
+    result = ThrowException(try_catch.Exception());
+  } else {
+    result = script->Run();
+    if (result.IsEmpty()) {
+      result = ThrowException(try_catch.Exception());
+    }
+  }
+
+  // Clean up, clean up, everybody everywhere!
+  context->DetachGlobal();
+  context->Exit();
+  context.Dispose();
+
+  return scope.Close(result);
+}
+
 Handle<Value> Compile(const Arguments& args) {
   HandleScope scope;
 
@@ -1053,6 +1096,7 @@ static void Load(int argc, char *argv[]) {
   // define various internal methods
   NODE_SET_METHOD(process, "loop", Loop);
   NODE_SET_METHOD(process, "unloop", Unloop);
+  NODE_SET_METHOD(process, "evalcx", EvalCX);
   NODE_SET_METHOD(process, "compile", Compile);
   NODE_SET_METHOD(process, "_byteLength", ByteLength);
   NODE_SET_METHOD(process, "reallyExit", Exit);
@@ -1183,13 +1227,21 @@ static void ParseDebugOpt(const char* arg) {
 
 static void PrintHelp() {
   printf("Usage: node [options] script.js [arguments] \n"
+         "Options:\n"
          "  -v, --version      print node's version\n"
          "  --debug[=port]     enable remote debugging via given TCP port\n"
          "                     without stopping the execution\n"
          "  --debug-brk[=port] as above, but break in script.js and\n"
          "                     wait for remote debugger to connect\n"
-         "  --cflags           print pre-processor and compiler flags\n"
-         "  --v8-options       print v8 command line options\n\n"
+         "  --v8-options       print v8 command line options\n"
+         "  --vars             print various compiled-in variables\n"
+         "\n"
+         "Enviromental variables:\n"
+         "NODE_PATH            ':'-separated list of directories\n"
+         "                     prefixed to the module search path,\n"
+         "                     require.paths.\n"
+         "NODE_DEBUG           Print additional debugging output.\n"
+         "\n"
          "Documentation can be found at http://nodejs.org/api.html"
          " or with 'man node'\n");
 }
@@ -1206,8 +1258,10 @@ static void ParseArgs(int *argc, char **argv) {
     } else if (strcmp(arg, "--version") == 0 || strcmp(arg, "-v") == 0) {
       printf("%s\n", NODE_VERSION);
       exit(0);
-    } else if (strcmp(arg, "--cflags") == 0) {
-      printf("%s\n", NODE_CFLAGS);
+    } else if (strcmp(arg, "--vars") == 0) {
+      printf("NODE_PREFIX: %s\n", NODE_PREFIX);
+      printf("NODE_LIBRARIES_PREFIX: %s/%s\n", NODE_PREFIX, "lib/node/libraries");
+      printf("NODE_CFLAGS: %s\n", NODE_CFLAGS);
       exit(0);
     } else if (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0) {
       PrintHelp();

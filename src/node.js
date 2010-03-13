@@ -13,7 +13,7 @@ function removed (reason) {
 }
 
 GLOBAL.__module = removed("'__module' has been renamed to 'module'");
-GLOBAL.include = removed("include(module) has been removed. Use process.mixin(GLOBAL, require(module)) to get the same effect.");
+GLOBAL.include = removed("include(module) has been removed. Use require(module)");
 GLOBAL.puts = removed("puts() has moved. Use require('sys') to bring it back.");
 GLOBAL.print = removed("print() has moved. Use require('sys') to bring it back.");
 GLOBAL.p = removed("p() has moved. Use require('sys') to bring it back.");
@@ -45,6 +45,7 @@ node.dns.createConnection = removed("node.dns.createConnection() has moved. Use 
 // Module 
 
 var internalModuleCache = {};
+var extensionCache = {};
 
 function Module (id, parent) {
   this.id = id;
@@ -99,7 +100,12 @@ process.assert = function (x, msg) {
 // Dual licensed under the MIT and GPL licenses.
 // http://docs.jquery.com/License
 // Modified for node.js (formely for copying properties correctly)
+var mixinMessage;
 process.mixin = function() {
+  if (!mixinMessage) {
+    mixinMessage = 'deprecation warning: process.mixin will be removed from node-core future releases.\n'
+    process.stdio.writeError(mixinMessage);
+  }
   // copy reference to target object
   var target = arguments[0] || {}, i = 1, length = arguments.length, deep = false, source;
 
@@ -164,31 +170,63 @@ var eventsModule = createInternalModule('events', function (exports) {
   // process.EventEmitter is defined in src/events.cc
   // process.EventEmitter.prototype.emit() is also defined there.
   process.EventEmitter.prototype.addListener = function (type, listener) {
-    if (listener instanceof Function) {
-      if (!this._events) this._events = {};
-      if (!this._events.hasOwnProperty(type)) this._events[type] = [];
-      // To avoid recursion in the case that type == "newListeners"! Before
-      // adding it to the listeners, first emit "newListeners".
-      this.emit("newListener", type, listener);
-      this._events[type].push(listener);
+    if (!(listener instanceof Function)) {
+      throw new Error('addListener only takes instances of Function');
     }
+
+    if (!this._events) this._events = {};
+
+    // To avoid recursion in the case that type == "newListeners"! Before
+    // adding it to the listeners, first emit "newListeners".
+    this.emit("newListener", type, listener);
+
+    if (!this._events[type]) {
+      // Optimize the case of one listener. Don't need the extra array object.
+      this._events[type] = listener;
+    } else if (this._events[type] instanceof Array) {
+      // If we've already got an array, just append.
+      this._events[type].push(listener);
+    } else {
+      // Adding the second element, need to change to array.
+      this._events[type] = [this._events[type], listener];
+    }
+
     return this;
   };
 
   process.EventEmitter.prototype.removeListener = function (type, listener) {
-    if (listener instanceof Function) {
-      // does not use listeners(), so no side effect of creating _events[type]
-      if (!this._events || !this._events.hasOwnProperty(type)) return;
-      var list = this._events[type];
-      if (list.indexOf(listener) < 0) return;
-      list.splice(list.indexOf(listener), 1);
+    if (!(listener instanceof Function)) {
+      throw new Error('removeListener only takes instances of Function');
     }
+
+    // does not use listeners(), so no side effect of creating _events[type]
+    if (!this._events || !this._events[type]) return this;
+
+    var list = this._events[type];
+
+    if (list instanceof Array) {
+      var i = list.indexOf(listener);
+      if (i < 0) return this;
+      list.splice(i, 1);
+    } else {
+      this._events[type] = null;
+    }
+
     return this;
+  };
+
+  process.EventEmitter.prototype.removeAllListeners = function (type) {
+    // does not use listeners(), so no side effect of creating _events[type]
+    if (!type || !this._events || !this._events[type]) return this;
+    this._events[type] = null;
   };
 
   process.EventEmitter.prototype.listeners = function (type) {
     if (!this._events) this._events = {};
-    if (!this._events.hasOwnProperty(type)) this._events[type] = [];
+    if (!this._events[type]) this._events[type] = [];
+    if (!(this._events[type] instanceof Array)) {
+      this._events[type] = [this._events[type]];
+    }
     return this._events[type];
   };
 
@@ -472,8 +510,14 @@ function findModulePath (id, dirs, callback) {
     path.join(dir, id + ".js"),
     path.join(dir, id + ".node"),
     path.join(dir, id, "index.js"),
-    path.join(dir, id, "index.addon")
+    path.join(dir, id, "index.node")
   ];
+
+  var ext;
+  for (ext in extensionCache) {
+    locations.push(path.join(dir, id + ext));
+    locations.push(path.join(dir, id, 'index' + ext));
+  }
 
   function searchLocations () {
     var location = locations.shift();
@@ -489,7 +533,7 @@ function findModulePath (id, dirs, callback) {
         } else {
           return searchLocations();
         }
-      })
+      });
 
     // if sync
     } else {
@@ -509,8 +553,13 @@ function resolveModulePath(request, parent) {
   var id, paths;
   if (request.charAt(0) == "." && (request.charAt(1) == "/" || request.charAt(1) == ".")) {
     // Relative request
+    var exts = ['js', 'node'], ext;
+    for (ext in extensionCache) {
+      exts.push(ext.slice(1));
+    }
+
     var parentIdPath = path.dirname(parent.id +
-      (path.basename(parent.filename).match(/^index\.(js|addon)$/) ? "/" : ""));
+      (path.basename(parent.filename).match(new RegExp('^index\\.(' + exts.join('|') + ')$')) ? "/" : ""));
     id = path.join(parentIdPath, request);
     // debug("RELATIVE: requested:"+request+" set ID to: "+id+" from "+parent.id+"("+parentIdPath+")");
     paths = [path.dirname(parent.filename)];
@@ -578,6 +627,32 @@ function loadModule (request, parent, callback) {
 };
 
 
+// This function allows the user to register file extensions to custom
+// Javascript 'compilers'.  It accepts 2 arguments, where ext is a file
+// extension as a string. E.g. '.coffee' for coffee-script files.  compiler
+// is the second argument, which is a function that gets called then the
+// specified file extension is found. The compiler is passed a single
+// argument, which is, the file contents, which need to be compiled.
+//
+// The function needs to return the compiled source, or an non-string
+// variable that will get attached directly to the module exports. Example:
+//
+//    require.registerExtension('.coffee', function(content) {
+//      return doCompileMagic(content);
+//    });
+function registerExtension(ext, compiler) {
+  if ('string' !== typeof ext && false === /\.\w+$/.test(ext)) {
+    throw new Error('require.registerExtension: First argument not a valid extension string.');
+  }
+
+  if ('function' !== typeof compiler) {
+    throw new Error('require.registerExtension: Second argument not a valid compiler function.');
+  }
+
+  extensionCache[ext] = compiler;
+}
+
+
 Module.prototype.loadSync = function (filename) {
   debug("loadSync " + JSON.stringify(filename) + " for module " + JSON.stringify(this.id));
 
@@ -643,6 +718,12 @@ Module.prototype._loadContent = function (content, filename) {
   // remove shebang
   content = content.replace(/^\#\!.*/, '');
 
+  // Compile content if needed
+  var ext = path.extname(filename);
+  if (extensionCache[ext]) {
+    content = extensionCache[ext](content);
+  }
+
   function requireAsync (url, cb) {
     loadModule(url, self, cb);
   }
@@ -654,19 +735,27 @@ Module.prototype._loadContent = function (content, filename) {
   require.paths = process.paths;
   require.async = requireAsync;
   require.main = process.mainModule;
-  // create wrapper function
-  var wrapper = "(function (exports, require, module, __filename, __dirname) { "
-              + content
-              + "\n});";
+  require.registerExtension = registerExtension;
 
-  try {
-    var compiledWrapper = process.compile(wrapper, filename);
-    var dirName = path.dirname(filename);
-    if (filename === process.argv[1])
-      process.checkBreak();
-    compiledWrapper.apply(self.exports, [self.exports, require, self, filename, dirName]);
-  } catch (e) {
-    return e;
+
+  if ('string' === typeof content) {
+    // create wrapper function
+    var wrapper = "(function (exports, require, module, __filename, __dirname) { "
+                + content
+                + "\n});";
+
+    try {
+      var compiledWrapper = process.compile(wrapper, filename);
+      var dirName = path.dirname(filename);
+      if (filename === process.argv[1]) {
+        process.checkBreak();
+      }
+      compiledWrapper.apply(self.exports, [self.exports, require, self, filename, dirName]);
+    } catch (e) {
+      return e;
+    }
+  } else {
+    self.exports = content;
   }
 };
 
@@ -757,4 +846,4 @@ process.loop();
 
 process.emit("exit");
 
-})
+});

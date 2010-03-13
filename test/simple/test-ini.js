@@ -1,5 +1,6 @@
-process.mixin(require("../common"));
-require("fs");
+require("../common");
+var path = require('path');
+var fs = require("fs");
 parse = require("ini").parse;
 
 debug("load fixtures/fixture.ini");
@@ -13,7 +14,30 @@ fs.readFile(p,function(err, data) {
 
   var iniContents = parse(data);
   assert.equal(typeof iniContents, 'object');
-  assert.deepEqual(iniContents,{"-":{"root":"something"},"section":{"one":"two","Foo":"Bar","this":"Your Mother!","blank":""},"Section Two":{"something else":"blah","remove":"whitespace"}})
+  
+  var expect =
+    { "-" :
+      { "root" : "something"
+      , "url" : "http://example.com/?foo=bar"
+      }
+    , "the section with whitespace" :
+      { "this has whitespace" : "yep"
+      , "just a flag, no value." : true
+      }
+    , "section" :
+      { "one" : "two"
+      , "Foo" : "Bar"
+      , "this" : "Your Mother!"
+      , "blank" : ""
+      }
+    , "Section Two" :
+      { "something else" : "blah"
+      , "remove" : "whitespace"
+      }
+    };
+  
+  assert.deepEqual(iniContents, expect,
+    "actual: \n"+inspect(iniContents) +"\n≠\nexpected:\n"+inspect(expect))
 
   assert.equal(iniContents['-']['root'],'something');
   assert.equal(iniContents['section']['blank'],'');
