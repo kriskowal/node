@@ -34,7 +34,7 @@
         exports.debug = +exports.env["NARWHAL_DEBUG"];
         exports.verbose = +exports.env["NARWHAL_VERBOSE"];
 
-        exports.os = "macosx";
+        exports.os = "macosx"; // XXX TODO
         exports.enginePrefix = exports.env["NARWHAL_ENGINE_HOME"];
         exports.prefix = exports.env["NARWHAL_HOME"];
         exports.prefixes = [exports.prefix];

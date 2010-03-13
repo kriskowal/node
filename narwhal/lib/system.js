@@ -17,7 +17,7 @@ exports.stdin  = new IO.TextInputStream(new IO.IO(rawStdin, null));
 exports.stdout = new IO.TextOutputStream(new IO.IO(null, rawStdout));
 exports.stderr = new IO.TextOutputStream(new IO.IO(null, rawStderr));
 
-exports.originalArgs = exports.args.slice(0);
+exports.originalArgs = exports.args.slice();
 
 exports.env = {};
 
