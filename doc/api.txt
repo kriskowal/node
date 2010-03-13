@@ -1,7 +1,7 @@
 NODE(1)
 =======
 Ryan Dahl <ry@tinyclouds.org>
-Version, 0.1.30, 2010.02.22
+Version, 0.1.32, 2010.03.12
 
 
 == NAME
@@ -19,7 +19,7 @@ World":
 var sys = require("sys"), 
    http = require("http");
 http.createServer(function (request, response) {
-  response.writeHeader(200, {"Content-Type": "text/plain"});
+  response.writeHead(200, {"Content-Type": "text/plain"});
   response.write("Hello World\n");
   response.close();
 }).listen(8000);
@@ -113,11 +113,10 @@ What platform you're running on. +"linux2"+, +"darwin"+, etc.
 Returns the memory usage of the Node process. It looks like this
 +
 ----------------------
-{
- "rss": 4935680,
- "vsize": 41893888,
- "heapTotal": 1826816,
- "heapUsed": 650472
+{ rss: 4935680
+, vsize: 41893888
+, heapTotal: 1826816
+, heapUsed: 650472
 }
 ----------------------
 +
@@ -144,56 +143,21 @@ Gets/sets the group identity of the process. (See setgid(2).)
 +process.chdir(directory)+::
 Changes the current working directory of the process.
 
-+process.umask(mask)+ ::
-Sets the process's file mode creation mask. Child processes inherit the mask 
-from the parent process.
-  - returns the old mask.
++process.umask([mask])+ ::
+Sets or read the process's file mode creation mask. Child processes inherit
+the mask from the parent process.
+  - returns the old mask if +mask+ argument is given, otherwise returns 
+the current mask.
 
 +process.kill(pid, signal="SIGTERM")+ ::
 Send a signal to a process. +pid+ is the process id and +signal+ is the
 signal to send; for example, "SIGINT" or "SIGUSR1".  See kill(2) for more
 information.
 
-+process.watchFile(filename, [options,] listener)+::
-Watch for changes on +filename+. The callback +listener+ will be called each
-time the file changes.
-+
-The second argument is optional. The +options+ if provided should be an
-object containing two members a boolean, +persistent+, and +interval+, a
-polling value in milliseconds. The default is +{persistent: true, interval:
-0}+.
-+
-The +listener+ gets two arguments the current stat object and the previous
-stat object:
-+
--------------------------
-process.watchFile(f, function (curr, prev) {
-  sys.puts("the current mtime is: " + curr.mtime);
-  sys.puts("the previous mtime was: " + prev.mtime);
-});
--------------------------
-+
-These stat objects are instances of +fs.Stat+. 
++process.compile(code, scriptOrigin)+::
+Similar to +eval()+ except that you can specify a +scriptOrigin+ for better
+error reporting and the +code+ cannot see the local scope.
 
-+process.unwatchFile(filename)+::
-Stop watching for changes on +filename+.
-
-+process.compile(source, scriptOrigin)+::
-Just like +eval()+ except that you can specify a +scriptOrigin+ for better
-error reporting.
-
-+process.mixin([deep], target, object1, [objectN])+ ::
-Extend one object with one or more others, returning the modified object.
-If no target is specified, the +GLOBAL+ namespace itself is extended. 
-Keep in mind that the target object will be modified, and will be returned
-from +process.mixin()+.
-+
-If a boolean true is specified as the first argument, Node performs a deep
-copy, recursively copying any objects it finds. Otherwise, the copy will
-share structure with the original object(s).
-+
-Undefined properties are not copied. However, properties inherited from the
-object's prototype will be copied over.
 
 == System module
 
@@ -201,17 +165,32 @@ These function are in the module +"sys"+. Use +require("sys")+ to access
 them.
 
 +puts(string)+::
-Outputs the +string+ and a trailing new-line to +stdout+.
+Outputs +string+ and a trailing new-line to +stdout+.
+
 
 +print(string)+::
 Like +puts()+ but without the trailing new-line.
 
+
 +debug(string)+::
 A synchronous output function. Will block the process and
-output the string immediately to stdout.
+output +string+ immediately to +stdout+.
 
-+inspect(object, showHidden)+ ::
-Return a string representation of the +object+. (For debugging.)  If showHidden is true, then the object's non-enumerable properties will be shown too.
++log(string)+::
+Output with timestamp.
+
+
++inspect(object, showHidden, depth)+ ::
+Return a string representation of +object+. (For debugging.) 
++
+If +showHidden+ is +true+, then the object's non-enumerable properties will be
+shown too.
++
+If +depth+ is provided, it tells +inspect+ how many times to recurse while
+formatting the object. This is useful for inspecting large complicated objects.
+The default is to only recurse twice.  To make it recurse indefinitely, pass
+in +null+ for +depth+.
+
 
 +exec(command, callback)+::
 Executes the command as a child process, buffers the output and returns it
@@ -228,7 +207,6 @@ sys.exec("ls /", function (err, stdout, stderr) {
 The callback gets the arguments +(err, stdout, stderr)+. On success +err+
 will be +null+. On error +err+ will be an instance of +Error+ and +err.code+
 will be the exit code of the child process.
-
 
 
 == Events
@@ -272,6 +250,9 @@ server.addListener("connection", function (socket) {
 +emitter.removeListener(event, listener)+ ::
 Remove a listener from the listener array for the specified event.
 *Caution*: changes array indices in the listener array behind the listener.
+
++emitter.removeAllListeners(event)+ ::
+Removes all listeners from the listener array for the specified event.
 
 +emitter.listeners(event)+ ::
 Returns an array of listeners for the specified event. This array can be
@@ -635,6 +616,14 @@ The callback gets two arguments +(err, resolvedPath)+.
 Synchronous readlink(2). Returns the resolved path.
 
 
++fs.realpath(path, callback)+ ::
+Asynchronous realpath(2).
+The callback gets two arguments +(err, resolvedPath)+.
+
++fs.realpathSync(path)+ ::
+Synchronous realpath(2). Returns the resolved path.
+
+
 +fs.unlink(path, callback)+ ::
 Asynchronous unlink(2).
 No arguments other than a possible exception are given to the completion callback.
@@ -744,6 +733,30 @@ fs.writeFile("message.txt", "Hello Node", function (err) {
 +fs.writeFileSync(filename, data, encoding="utf8")+::
 The synchronous version of +fs.writeFile+.
 
++fs.watchFile(filename, [options,] listener)+::
+Watch for changes on +filename+. The callback +listener+ will be called each
+time the file changes.
++
+The second argument is optional. The +options+ if provided should be an
+object containing two members a boolean, +persistent+, and +interval+, a
+polling value in milliseconds. The default is +{persistent: true, interval:
+0}+.
++
+The +listener+ gets two arguments the current stat object and the previous
+stat object:
++
+-------------------------
+fs.watchFile(f, function (curr, prev) {
+  sys.puts("the current mtime is: " + curr.mtime);
+  sys.puts("the previous mtime was: " + prev.mtime);
+});
+-------------------------
++
+These stat objects are instances of +fs.Stat+. 
+
++fs.unwatchFile(filename)+::
+Stop watching for changes on +filename+.
+
 
 
 === +fs.Stats+
@@ -763,6 +776,89 @@ Objects returned from +fs.stat()+ and +fs.lstat()+ are of this type.
 +stats.isFIFO()+::
 
 +stats.isSocket()+:: ...
+
+=== +fs.FileReadStream+
+
+[cols="1,2,10",options="header"]
+|=========================================================
+|Event           | Parameters          | Notes
+
+|+"open"+        | +fd+                | The file descriptor was opened.
+|+"data"+        | +chunk+             | A chunk of data was read.
+|+"error"+       | +err+               | An error occured. This stops the stream.
+|+"end"+         |                     | The end of the file was reached.
+|+"close"+       |                     | The file descriptor was closed.
+|=========================================================
+
++fs.createReadStream(path, [options]);+ ::
+Returns a new FileReadStream object.
++
++options+ is an object with the following defaults:
++
+----------------------------------------
+{ "flags": "r"
+, "encoding": "binary"
+, "mode": 0666
+, "bufferSize": 4 * 1024
+}
+----------------------------------------
+
++readStream.readable+ ::
+A boolean that is +true+ by default, but turns +false+ after an +"error"+
+occured, the stream came to an "end", or +forceClose()+ was called.
+
++readStream.pause()+ ::
+Stops the stream from reading further data. No +"data"+ event will be fired
+until the stream is resumed.
+
++readStream.resume()+ ::
+Resumes the stream. Together with +pause()+ this useful to throttle reading.
+
++readStream.forceClose([callback])+ ::
+Allows to close the stream before the +"end"+ is reached. No more events other
+than +"close"+ will be fired after this method has been called.
+
+=== +fs.FileWriteStream+
+
+[cols="1,2,10",options="header"]
+|=========================================================
+|Event           | Parameters          | Notes
+
+|+"open"+        | +fd+                | The file descriptor was opened.
+|+"drain"+       |                     | No more data needs to be written.
+|+"error"+       | +err+               | An error occured. This stops the stream.
+|+"close"+       |                     | The file descriptor was closed.
+|=========================================================
+
++fs.createWriteStream(path, [options]);+ ::
+Returns a new FileWriteStream object.
++
++options+ is an object with the following defaults:
++
+----------------------------------------
+{ "flags": "w"
+, "encoding": "binary"
+, "mode": 0666
+}
+----------------------------------------
+
++writeStream.writeable+ ::
+A boolean that is +true+ by default, but turns +false+ after an +"error"+
+occured or +close()+ / +forceClose()+ was called.
+
++writeStream.write(data, [callback])+ ::
+Returns +true+ if the data was flushed to the kernel, and +false+ if it was
+queued up for being written later. A +"drain"+ will fire after all queued data
+has been written.
++
+You can also specify +callback+ to be notified when the data from this write
+has been flushed. The first param is +err+, the second is +bytesWritten+.
+
++writeStream.close([callback])+ ::
+Closes the stream right after all queued +write()+ calls have finished.
+
++writeStream.forceClose([callback])+ ::
+Allows to close the stream regardless of its current state.
 
 == HTTP
 
@@ -894,11 +990,10 @@ If you would like to parse the URL into its parts, you can use
 +
 ----------------------------------------
 node> require("url").parse("/status?name=ryan")
-{
- "href": "/status?name=ryan",
- "search": "?name=ryan",
- "query": "name=ryan",
- "pathname": "/status"
+{ href: '/status?name=ryan'
+, search: '?name=ryan'
+, query: 'name=ryan'
+, pathname: '/status'
 }
 ----------------------------------------
 +
@@ -908,13 +1003,10 @@ you can use the +require("querystring").parse+ function, or pass
 +
 ----------------------------------------
 node> require("url").parse("/status?name=ryan", true)
-{
- "href": "/status?name=ryan",
- "search": "?name=ryan",
- "query": {
-  "name": "ryan"
- },
- "pathname": "/status"
+{ href: '/status?name=ryan'
+, search: '?name=ryan'
+, query: { name: 'ryan' }
+, pathname: '/status'
 }
 ----------------------------------------
 +
@@ -951,7 +1043,7 @@ The +http.Connection+ object.
 This object is created internally by a HTTP server--not by the user. It is
 passed as the second parameter to the +"request"+ event.
 
-+response.writeHeader(statusCode[, reasonPhrase] , headers)+ ::
++response.writeHead(statusCode[, reasonPhrase] , headers)+ ::
 
 Sends a response header to the request. The status code is a 3-digit HTTP
 status code, like +404+. The last argument, +headers+, are the response headers.
@@ -962,7 +1054,7 @@ Example:
 +
 ----------------------------------------
 var body = "hello world";
-response.writeHeader(200, {
+response.writeHead(200, {
   "Content-Length": body.length,
   "Content-Type": "text/plain"
 });
@@ -973,7 +1065,7 @@ be called before +response.close()+ is called.
 
 +response.write(chunk, encoding="ascii")+ ::
 
-This method must be called after +writeHeader+ was
+This method must be called after +writeHead+ was
 called. It sends a chunk of the response body. This method may
 be called multiple times to provide successive parts of the body.
 +
@@ -1297,7 +1389,7 @@ http.createServer(function (req, res) {
     fields = {},
     name, filename;
   mp.addListener("error", function (er) {
-    res.writeHeader(400, {"content-type":"text/plain"});
+    res.writeHead(400, {"content-type":"text/plain"});
     res.write("You sent a bad message!\n"+er.message);
     res.close();
   });
@@ -1317,7 +1409,7 @@ http.createServer(function (req, res) {
   });
   mp.addListener("complete", function () {
     var response = "You posted: \n" + sys.inspect(fields);
-    res.writeHeader(200, {
+    res.writeHead(200, {
       "content-type" : "text/plain",
       "content-length" : response.length
     });
@@ -1476,6 +1568,10 @@ Sets the encoding (either +"ascii"+, +"utf8"+, or +"binary"+) for data that is r
 Sends data on the connection. The second parameter specifies the encoding
 in the case of a string--it defaults to ASCII because encoding to UTF8 is
 rather slow.
++
+Returns +true+ if the entire data was flushed successfully to the kernel
+buffer. Returns +false+ if all or part of the data was queued in user memory.
++'drain'+ will be emitted when the buffer is again free.
 
 
 +connection.close()+::
@@ -1683,13 +1779,7 @@ Normalize an array of path parts, taking care of +".."+ and +"."+ parts.  Exampl
 path.normalizeArray(["", 
   "foo", "bar", "baz", "asdf", "quux", ".."])
 // returns
-[
-  "",
-  "foo",
-  "bar",
-  "baz",
-  "asdf"
-]
+[ '', 'foo', 'bar', 'baz', 'asdf' ]
 ------------------------------------
 +
 

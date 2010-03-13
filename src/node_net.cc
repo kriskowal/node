@@ -337,7 +337,7 @@ int Connection::AfterResolve(eio_req *req) {
   if (address_list) freeaddrinfo(address_list);
 
   // no error. return.
-  if (req->result == 0) {
+  if (req->result == 0 && !r) {
     evcom_stream_attach(EV_DEFAULT_UC_ &connection->stream_);
     goto out;
   }
@@ -348,7 +348,13 @@ int Connection::AfterResolve(eio_req *req) {
    * The fact that I'm modifying a read-only variable here should be
    * good evidence of this.
    */
-  connection->stream_.errorno = req->result;
+
+  if (req->result) {
+    connection->stream_.errorno = req->result;
+  } else {
+    assert(r);
+    assert(connection->stream_.errorno);
+  }
 
   connection->OnClose();
 
@@ -627,12 +633,12 @@ Handle<Value> Connection::Write(const Arguments& args) {
   }
 
   char * buf = new char[len];
-  ssize_t written = DecodeWrite(buf, len, args[0], enc);
-  assert(written == len);
-  connection->Write(buf, written);
+  ssize_t bufsize = DecodeWrite(buf, len, args[0], enc);
+  assert(bufsize == len);
+  ssize_t sent = connection->Write(buf, bufsize);
   delete [] buf;
 
-  return scope.Close(Integer::New(written));
+  return sent == bufsize ? True() : False();
 }
 
 void Connection::OnReceive(const void *buf, size_t len) {

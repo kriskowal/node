@@ -13,18 +13,21 @@ function removed (reason) {
 }
 
 GLOBAL.__module = removed("'__module' has been renamed to 'module'");
-GLOBAL.include = removed("include(module) has been removed. Use process.mixin(GLOBAL, require(module)) to get the same effect.");
+GLOBAL.include = removed("include(module) has been removed. Use require(module)");
 GLOBAL.puts = removed("puts() has moved. Use require('sys') to bring it back.");
 GLOBAL.print = removed("print() has moved. Use require('sys') to bring it back.");
 GLOBAL.p = removed("p() has moved. Use require('sys') to bring it back.");
 process.debug = removed("process.debug() has moved. Use require('sys') to bring it back.");
 process.error = removed("process.error() has moved. Use require('sys') to bring it back.");
+process.watchFile = removed("process.watchFile() has moved to fs.watchFile()");
+process.unwatchFile = removed("process.unwatchFile() has moved to fs.unwatchFile()");
 
 GLOBAL.node = {};
 
 node.createProcess = removed("node.createProcess() has been changed to process.createChildProcess() update your code");
 node.exec = removed("process.exec() has moved. Use require('sys') to bring it back.");
 node.inherits = removed("node.inherits() has moved. Use require('sys') to access it.");
+process.inherits = removed("process.inherits() has moved to sys.inherits.");
 
 node.http = {};
 node.http.createServer = removed("node.http.createServer() has moved. Use require('http') to access it.");
@@ -42,6 +45,7 @@ node.dns.createConnection = removed("node.dns.createConnection() has moved. Use 
 // Module 
 
 var internalModuleCache = {};
+var extensionCache = {};
 
 function Module (id, parent) {
   this.id = id;
@@ -67,15 +71,6 @@ function createInternalModule (id, constructor) {
   m.loaded = true;
   internalModuleCache[id] = m;
   return m;
-};
-
-
-process.inherits = function (ctor, superCtor) {
-  var tempCtor = function(){};
-  tempCtor.prototype = superCtor.prototype;
-  ctor.super_ = superCtor;
-  ctor.prototype = new tempCtor();
-  ctor.prototype.constructor = ctor;
 };
 
 
@@ -105,7 +100,12 @@ process.assert = function (x, msg) {
 // Dual licensed under the MIT and GPL licenses.
 // http://docs.jquery.com/License
 // Modified for node.js (formely for copying properties correctly)
+var mixinMessage;
 process.mixin = function() {
+  if (!mixinMessage) {
+    mixinMessage = 'deprecation warning: process.mixin will be removed from node-core future releases.\n'
+    process.stdio.writeError(mixinMessage);
+  }
   // copy reference to target object
   var target = arguments[0] || {}, i = 1, length = arguments.length, deep = false, source;
 
@@ -132,7 +132,7 @@ process.mixin = function() {
     if ( (source = arguments[i]) != null ) {
       // Extend the base object
       Object.getOwnPropertyNames(source).forEach(function(k){
-        var d = Object.getOwnPropertyDescriptor(source, k);
+        var d = Object.getOwnPropertyDescriptor(source, k) || {value: source[k]};
         if (d.get) {
           target.__defineGetter__(k, d.get);
           if (d.set) {
@@ -170,31 +170,63 @@ var eventsModule = createInternalModule('events', function (exports) {
   // process.EventEmitter is defined in src/events.cc
   // process.EventEmitter.prototype.emit() is also defined there.
   process.EventEmitter.prototype.addListener = function (type, listener) {
-    if (listener instanceof Function) {
-      if (!this._events) this._events = {};
-      if (!this._events.hasOwnProperty(type)) this._events[type] = [];
-      // To avoid recursion in the case that type == "newListeners"! Before
-      // adding it to the listeners, first emit "newListeners".
-      this.emit("newListener", type, listener);
-      this._events[type].push(listener);
+    if (!(listener instanceof Function)) {
+      throw new Error('addListener only takes instances of Function');
     }
+
+    if (!this._events) this._events = {};
+
+    // To avoid recursion in the case that type == "newListeners"! Before
+    // adding it to the listeners, first emit "newListeners".
+    this.emit("newListener", type, listener);
+
+    if (!this._events[type]) {
+      // Optimize the case of one listener. Don't need the extra array object.
+      this._events[type] = listener;
+    } else if (this._events[type] instanceof Array) {
+      // If we've already got an array, just append.
+      this._events[type].push(listener);
+    } else {
+      // Adding the second element, need to change to array.
+      this._events[type] = [this._events[type], listener];
+    }
+
     return this;
   };
 
   process.EventEmitter.prototype.removeListener = function (type, listener) {
-    if (listener instanceof Function) {
-      // does not use listeners(), so no side effect of creating _events[type]
-      if (!this._events || !this._events.hasOwnProperty(type)) return;
-      var list = this._events[type];
-      if (list.indexOf(listener) < 0) return;
-      list.splice(list.indexOf(listener), 1);
+    if (!(listener instanceof Function)) {
+      throw new Error('removeListener only takes instances of Function');
     }
+
+    // does not use listeners(), so no side effect of creating _events[type]
+    if (!this._events || !this._events[type]) return this;
+
+    var list = this._events[type];
+
+    if (list instanceof Array) {
+      var i = list.indexOf(listener);
+      if (i < 0) return this;
+      list.splice(i, 1);
+    } else {
+      this._events[type] = null;
+    }
+
     return this;
+  };
+
+  process.EventEmitter.prototype.removeAllListeners = function (type) {
+    // does not use listeners(), so no side effect of creating _events[type]
+    if (!type || !this._events || !this._events[type]) return this;
+    this._events[type] = null;
   };
 
   process.EventEmitter.prototype.listeners = function (type) {
     if (!this._events) this._events = {};
-    if (!this._events.hasOwnProperty(type)) this._events[type] = [];
+    if (!this._events[type]) this._events[type] = [];
+    if (!(this._events[type] instanceof Array)) {
+      this._events[type] = [this._events[type]];
+    }
     return this._events[type];
   };
 
@@ -246,114 +278,39 @@ process.addListener("newListener", function (event) {
 });
 
 
-// Stat Change Watchers
-
-var statWatchers = {};
-
-process.watchFile = function (filename) {
-  var stat;
-  var options;
-  var listener;
-
-  if ("object" == typeof arguments[1]) {
-    options = arguments[1];
-    listener = arguments[2];
-  } else {
-    options = {};
-    listener = arguments[1];
-  }
-
-  if (options.persistent === undefined) options.persistent = true;
-  if (options.interval === undefined) options.interval = 0;
-
-  if (filename in statWatchers) {
-    stat = statWatchers[filename];
-  } else {
-    statWatchers[filename] = new process.Stat();
-    stat = statWatchers[filename];
-    stat.start(filename, options.persistent, options.interval);
-  }
-  stat.addListener("change", listener);
-  return stat;
-};
-
-process.unwatchFile = function (filename) {
-  if (filename in statWatchers) {
-    stat = statWatchers[filename];
-    stat.stop();
-    statWatchers[filename] = undefined;
-  }
-};
-
-process.Stats.prototype._checkModeProperty = function (property) {
-  return ((this.mode & property) === property);
-};
-
-process.Stats.prototype.isDirectory = function () {
-  return this._checkModeProperty(process.S_IFDIR);
-};
-
-process.Stats.prototype.isFile = function () {
-  return this._checkModeProperty(process.S_IFREG);
-};
-
-process.Stats.prototype.isBlockDevice = function () {
-  return this._checkModeProperty(process.S_IFBLK);
-};
-
-process.Stats.prototype.isCharacterDevice = function () {
-  return this._checkModeProperty(process.S_IFCHR);
-};
-
-process.Stats.prototype.isSymbolicLink = function () {
-  return this._checkModeProperty(process.S_IFLNK);
-};
-
-process.Stats.prototype.isFIFO = function () {
-  return this._checkModeProperty(process.S_IFIFO);
-};
-
-process.Stats.prototype.isSocket = function () {
-  return this._checkModeProperty(process.S_IFSOCK);
-};
-
-
-
 // Timers
 function addTimerListener (callback) {
   var timer = this;
   // Special case the no param case to avoid the extra object creation.
   if (arguments.length > 2) {
     var args = Array.prototype.slice.call(arguments, 2);
-    timer.addListener("timeout", function(){
-      callback.apply(timer, args);
-    });
+    timer.callback = function () { callback.apply(timer, args); };
   } else {
-    timer.addListener("timeout", callback);
+    timer.callback = callback;
   }
 }
 
-GLOBAL.setTimeout = function (callback, after) {
+global.setTimeout = function (callback, after) {
   var timer = new process.Timer();
   addTimerListener.apply(timer, arguments);
   timer.start(after, 0);
   return timer;
 };
 
-GLOBAL.setInterval = function (callback, repeat) {
+global.setInterval = function (callback, repeat) {
   var timer = new process.Timer();
   addTimerListener.apply(timer, arguments);
   timer.start(repeat, repeat);
   return timer;
 };
 
-GLOBAL.clearTimeout = function (timer) {
+global.clearTimeout = function (timer) {
   if (timer instanceof process.Timer) {
     timer.stop();
   }
 };
 
-GLOBAL.clearInterval = GLOBAL.clearTimeout;
+global.clearInterval = global.clearTimeout;
 
 
 
@@ -371,278 +328,60 @@ function debug (x) {
 
 
 
-var fsModule = createInternalModule("fs", function (exports) {
-  exports.Stats = process.Stats;
-  
-  // Used by fs.open and friends
-  function stringToFlags(flag) {
-    // Only mess with strings
-    if (typeof flag !== 'string') {
-      return flag;
+
+function readAll (fd, pos, content, encoding, callback) {
+  process.fs.read(fd, 4*1024, pos, encoding, function (err, chunk, bytesRead) {
+    if (err) {
+      if (callback) callback(err);
+    } else if (chunk) {
+      content += chunk;
+      pos += bytesRead;
+      readAll(fd, pos, content, encoding, callback);
+    } else {
+      process.fs.close(fd, function (err) {
+        if (callback) callback(err, content);
+      });
     }
-    switch (flag) {
-      case "r": return process.O_RDONLY;
-      case "r+": return process.O_RDWR;
-      case "w": return process.O_CREAT | process.O_TRUNC | process.O_WRONLY;
-      case "w+": return process.O_CREAT | process.O_TRUNC | process.O_RDWR;
-      case "a": return process.O_APPEND | process.O_CREAT | process.O_WRONLY; 
-      case "a+": return process.O_APPEND | process.O_CREAT | process.O_RDWR;
-      default: throw new Error("Unknown file open flag: " + flag);
+  });
+}
+
+process.fs.readFile = function (path, encoding_, callback) {
+  var encoding = typeof(encoding_) == 'string' ? encoding_ : 'utf8';
+  var callback_ = arguments[arguments.length - 1];
+  var callback = (typeof(callback_) == 'function' ? callback_ : null);
+  process.fs.open(path, process.O_RDONLY, 0666, function (err, fd) {
+    if (err) {
+      if (callback) callback(err); 
+    } else {
+      readAll(fd, 0, "", encoding, callback);
     }
+  });
+};
+
+process.fs.readFileSync = function (path, encoding) {
+  encoding = encoding || "utf8"; // default to utf8
+
+  debug('readFileSync open');
+
+  var fd = process.fs.open(path, process.O_RDONLY, 0666);
+  var content = '';
+  var pos = 0;
+  var r;
+
+  while ((r = process.fs.read(fd, 4*1024, pos, encoding)) && r[0]) {
+    debug('readFileSync read ' + r[1]);
+    content += r[0];
+    pos += r[1]
   }
 
-  function noop () {}
+  debug('readFileSync close');
 
-  // Yes, the follow could be easily DRYed up but I provide the explicit
-  // list to make the arguments clear.
+  process.fs.close(fd);
 
-  exports.close = function (fd, callback) {
-    process.fs.close(fd, callback || noop);
-  };
+  debug('readFileSync done');
 
-  exports.closeSync = function (fd) {
-    return process.fs.close(fd);
-  };
-
-  exports.open = function (path, flags, mode, callback) {
-    if (mode === undefined) { mode = 0666; }
-    process.fs.open(path, stringToFlags(flags), mode, callback || noop);
-  };
-
-  exports.openSync = function (path, flags, mode) {
-    if (mode === undefined) { mode = 0666; }
-    return process.fs.open(path, stringToFlags(flags), mode);
-  };
-
-  exports.read = function (fd, length, position, encoding, callback) {
-    encoding = encoding || "binary";
-    process.fs.read(fd, length, position, encoding, callback || noop);
-  };
-
-  exports.readSync = function (fd, length, position, encoding) {
-    encoding = encoding || "binary";
-    return process.fs.read(fd, length, position, encoding);
-  };
-
-  exports.write = function (fd, data, position, encoding, callback) {
-    encoding = encoding || "binary";
-    process.fs.write(fd, data, position, encoding, callback || noop);
-  };
-
-  exports.writeSync = function (fd, data, position, encoding) {
-    encoding = encoding || "binary";
-    return process.fs.write(fd, data, position, encoding);
-  };
-
-  exports.rename = function (oldPath, newPath, callback) {
-    process.fs.rename(oldPath, newPath, callback || noop);
-  };
-
-  exports.renameSync = function (oldPath, newPath) {
-    return process.fs.rename(oldPath, newPath);
-  };
-
-  exports.truncate = function (fd, len, callback) {
-    process.fs.truncate(fd, len, callback || noop);
-  };
-
-  exports.truncateSync = function (fd, len) {
-    return process.fs.truncate(fd, len);
-  };
-
-  exports.rmdir = function (path, callback) {
-    process.fs.rmdir(path, callback || noop);
-  };
-
-  exports.rmdirSync = function (path) {
-    return process.fs.rmdir(path);
-  };
-
-  exports.mkdir = function (path, mode, callback) {
-    process.fs.mkdir(path, mode, callback || noop);
-  };
-
-  exports.mkdirSync = function (path, mode) {
-    return process.fs.mkdir(path, mode);
-  };
-
-  exports.sendfile = function (outFd, inFd, inOffset, length, callback) {
-    process.fs.sendfile(outFd, inFd, inOffset, length, callback || noop);
-  };
-
-  exports.sendfileSync = function (outFd, inFd, inOffset, length) {
-    return process.fs.sendfile(outFd, inFd, inOffset, length);
-  };
-
-  exports.readdir = function (path, callback) {
-    process.fs.readdir(path, callback || noop);
-  };
-
-  exports.readdirSync = function (path) {
-    return process.fs.readdir(path);
-  };
-
-  exports.lstat = function (path, callback) {
-    process.fs.lstat(path, callback || noop);
-  };
-
-  exports.stat = function (path, callback) {
-    process.fs.stat(path, callback || noop);
-  };
-
-  exports.lstatSync = function (path) {
-    return process.fs.lstat(path);
-  };
-
-  exports.statSync = function (path) {
-    return process.fs.stat(path);
-  };
-
-  exports.readlink = function (path, callback) {
-    process.fs.readlink(path, callback || noop);
-  };
-
-  exports.readlinkSync = function (path) {
-    return process.fs.readlink(path);
-  };
-
-  exports.symlink = function (destination, path, callback) {
-    process.fs.symlink(destination, path, callback || noop);
-  };
-
-  exports.symlinkSync = function (destination, path) {
-    return process.fs.symlink(destination, path);
-  };
-
-  exports.link = function (srcpath, dstpath, callback) {
-    process.fs.link(srcpath, dstpath, callback || noop);
-  };
-
-  exports.linkSync = function (srcpath, dstpath) {
-    return process.fs.link(srcpath, dstpath);
-  };
-
-  exports.unlink = function (path, callback) {
-    process.fs.unlink(path, callback || noop);
-  };
-
-  exports.unlinkSync = function (path) {
-    return process.fs.unlink(path);
-  };
-  
-  exports.chmod = function (path, mode, callback) {
-    process.fs.chmod(path, mode, callback || noop);
-  };
-  
-  exports.chmodSync = function (path, mode) {
-    return process.fs.chmod(path, mode);
-  };
-
-  function writeAll (fd, data, encoding, callback) {
-    exports.write(fd, data, 0, encoding, function (writeErr, written) {
-      if (writeErr) {
-        exports.close(fd, function () {
-          if (callback) callback(writeErr);
-        });
-      } else {
-        if (written === data.length) {
-          exports.close(fd, callback);
-        } else {
-          writeAll(fd, data.slice(written), encoding, callback);
-        }
-      }
-    });
-  }
-
-  exports.writeFile = function (path, data, encoding_) {
-    var encoding = (typeof(encoding_) == 'string' ? encoding_ : 'utf8');
-    var callback_ = arguments[arguments.length - 1];
-    var callback = (typeof(callback_) == 'function' ? callback_ : null);
-    exports.open(path, 'w', 0666, function (openErr, fd) {
-      if (openErr) {
-        if (callback) callback(openErr);
-      } else {
-        writeAll(fd, data, encoding, callback);
-      }
-    });
-  };
-  
-  exports.writeFileSync = function (path, data, encoding) {
-    encoding = encoding || "utf8"; // default to utf8
-    var fd = exports.openSync(path, "w");
-    var written = 0;
-    while (written < data.length) {
-      written += exports.writeSync(fd, data, 0, encoding);
-      data = data.slice(written);
-    }
-    exports.closeSync(fd);
-  };
-  
-  exports.cat = function () {
-    throw new Error("fs.cat is deprecated. Please use fs.readFile instead.");
-  };
-
-  function readAll (fd, pos, content, encoding, callback) {
-    exports.read(fd, 4*1024, pos, encoding, function (err, chunk, bytesRead) {
-      if (err) {
-        if (callback) callback(err);
-      } else if (chunk) {
-        content += chunk;
-        pos += bytesRead;
-        readAll(fd, pos, content, encoding, callback);
-      } else {
-        process.fs.close(fd, function (err) {
-          if (callback) callback(err, content);
-        });
-      }
-    });
-  }
-
-  exports.readFile = function (path, encoding_) {
-    var encoding = typeof(encoding_) == 'string' ? encoding : 'utf8';
-    var callback_ = arguments[arguments.length - 1];
-    var callback = (typeof(callback_) == 'function' ? callback_ : null);
-    exports.open(path, 'r', 0666, function (err, fd) {
-      if (err) {
-        if (callback) callback(err); 
-      } else {
-        readAll(fd, 0, "", encoding, callback);
-      }
-    });
-  };
-
-  exports.catSync = function () {
-    throw new Error("fs.catSync is deprecated. Please use fs.readFileSync instead.");
-  };
-
-  exports.readFileSync = function (path, encoding) {
-    encoding = encoding || "utf8"; // default to utf8
-
-    debug('readFileSync open');
-
-    var fd = exports.openSync(path, "r");
-    var content = '';
-    var pos = 0;
-    var r;
-
-    while ((r = exports.readSync(fd, 4*1024, pos, encoding)) && r[0]) {
-      debug('readFileSync read ' + r[1]);
-      content += r[0];
-      pos += r[1]
-    }
-
-    debug('readFileSync close');
-
-    exports.closeSync(fd);
-
-    debug('readFileSync done');
-
-    return content;
-  };
-});
-
-var fs = fsModule.exports;
-
+  return content;
+};
 
 var pathModule = createInternalModule("path", function (exports) {
   exports.join = function () {
@@ -703,7 +442,7 @@ var pathModule = createInternalModule("path", function (exports) {
   };
 
   exports.exists = function (path, callback) {
-    fs.stat(path, function (err, stats) {
+    process.fs.stat(path, function (err, stats) {
       if (callback) callback(err ? false : true);
     });
   };
@@ -713,7 +452,7 @@ var path = pathModule.exports;
 
 function existsSync (path) {
   try {
-    fs.statSync(path);
+    process.fs.stat(path);
     return true;
   } catch (e) {
     return false;
@@ -771,8 +510,14 @@ function findModulePath (id, dirs, callback) {
     path.join(dir, id + ".js"),
     path.join(dir, id + ".node"),
     path.join(dir, id, "index.js"),
-    path.join(dir, id, "index.addon")
+    path.join(dir, id, "index.node")
   ];
+
+  var ext;
+  for (ext in extensionCache) {
+    locations.push(path.join(dir, id + ext));
+    locations.push(path.join(dir, id, 'index' + ext));
+  }
 
   function searchLocations () {
     var location = locations.shift();
@@ -788,7 +533,7 @@ function findModulePath (id, dirs, callback) {
         } else {
           return searchLocations();
         }
-      })
+      });
 
     // if sync
     } else {
@@ -808,8 +553,13 @@ function resolveModulePath(request, parent) {
   var id, paths;
   if (request.charAt(0) == "." && (request.charAt(1) == "/" || request.charAt(1) == ".")) {
     // Relative request
+    var exts = ['js', 'node'], ext;
+    for (ext in extensionCache) {
+      exts.push(ext.slice(1));
+    }
+
     var parentIdPath = path.dirname(parent.id +
-      (path.basename(parent.filename).match(/^index\.(js|addon)$/) ? "/" : ""));
+      (path.basename(parent.filename).match(new RegExp('^index\\.(' + exts.join('|') + ')$')) ? "/" : ""));
     id = path.join(parentIdPath, request);
     // debug("RELATIVE: requested:"+request+" set ID to: "+id+" from "+parent.id+"("+parentIdPath+")");
     paths = [path.dirname(parent.filename)];
@@ -877,6 +627,32 @@ function loadModule (request, parent, callback) {
 };
 
 
+// This function allows the user to register file extensions to custom
+// Javascript 'compilers'.  It accepts 2 arguments, where ext is a file
+// extension as a string. E.g. '.coffee' for coffee-script files.  compiler
+// is the second argument, which is a function that gets called then the
+// specified file extension is found. The compiler is passed a single
+// argument, which is, the file contents, which need to be compiled.
+//
+// The function needs to return the compiled source, or an non-string
+// variable that will get attached directly to the module exports. Example:
+//
+//    require.registerExtension('.coffee', function(content) {
+//      return doCompileMagic(content);
+//    });
+function registerExtension(ext, compiler) {
+  if ('string' !== typeof ext && false === /\.\w+$/.test(ext)) {
+    throw new Error('require.registerExtension: First argument not a valid extension string.');
+  }
+
+  if ('function' !== typeof compiler) {
+    throw new Error('require.registerExtension: Second argument not a valid compiler function.');
+  }
+
+  extensionCache[ext] = compiler;
+}
+
+
 Module.prototype.loadSync = function (filename) {
   debug("loadSync " + JSON.stringify(filename) + " for module " + JSON.stringify(this.id));
 
@@ -932,7 +708,7 @@ function cat (id, callback) {
       }
     });
   } else {
-    fs.readFile(id, callback);
+    process.fs.readFile(id, callback);
   }
 }
 
@@ -941,6 +717,12 @@ Module.prototype._loadContent = function (content, filename) {
   var self = this;
   // remove shebang
   content = content.replace(/^\#\!.*/, '');
+
+  // Compile content if needed
+  var ext = path.extname(filename);
+  if (extensionCache[ext]) {
+    content = extensionCache[ext](content);
+  }
 
   function requireAsync (url, cb) {
     loadModule(url, self, cb);
@@ -953,25 +735,33 @@ Module.prototype._loadContent = function (content, filename) {
   require.paths = process.paths;
   require.async = requireAsync;
   require.main = process.mainModule;
-  // create wrapper function
-  var wrapper = "(function (exports, require, module, __filename, __dirname) { "
-              + content
-              + "\n});";
+  require.registerExtension = registerExtension;
 
-  try {
-    var compiledWrapper = process.compile(wrapper, filename);
-    var dirName = path.dirname(filename);
-    if (filename === process.argv[1])
-      process.checkBreak();
-    compiledWrapper.apply(self.exports, [self.exports, require, self, filename, dirName]);
-  } catch (e) {
-    return e;
+
+  if ('string' === typeof content) {
+    // create wrapper function
+    var wrapper = "(function (exports, require, module, __filename, __dirname) { "
+                + content
+                + "\n});";
+
+    try {
+      var compiledWrapper = process.compile(wrapper, filename);
+      var dirName = path.dirname(filename);
+      if (filename === process.argv[1]) {
+        process.checkBreak();
+      }
+      compiledWrapper.apply(self.exports, [self.exports, require, self, filename, dirName]);
+    } catch (e) {
+      return e;
+    }
+  } else {
+    self.exports = content;
   }
 };
 
 
 Module.prototype._loadScriptSync = function (filename) {
-  var content = fs.readFileSync(filename);
+  var content = process.fs.readFileSync(filename);
   // remove shebang
   content = content.replace(/^\#\!.*/, '');
 
@@ -1056,4 +846,4 @@ process.loop();
 
 process.emit("exit");
 
-})
+});

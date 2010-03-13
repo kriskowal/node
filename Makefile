@@ -16,13 +16,25 @@ uninstall:
 	@$(WAF) uninstall
 
 test: all
-	python tools/test.py --mode=release
+	python tools/test.py --mode=release simple
 
 test-all: all
 	python tools/test.py --mode=debug,release
 
+test-release: all
+	python tools/test.py --mode=release
+
 test-debug: all
 	python tools/test.py --mode=debug
+
+test-simple: all
+	python tools/test.py simple
+     
+test-pummel: all
+	python tools/test.py pummel
+	
+test-internet: all
+	python tools/test.py internet
 
 benchmark: all
 	build/default/node benchmark/run.js
@@ -54,12 +66,12 @@ website-upload: doc
 docclean:
 	@-rm -f doc/node.1 doc/api.xml doc/api.html doc/changelog.html
 
-clean: docclean
+clean:
 	@$(WAF) clean
-
-distclean: docclean
-	@-rm -rf build/
 	@-find tools/ -name "*.pyc" -delete
+
+distclean: clean docclean
+	@-rm -rf build/
 
 check:
 	@tools/waf-light check

@@ -1,7 +1,5 @@
-var path = require("path");
-libDir = path.join(path.dirname(__filename), "../lib");
-require.paths.unshift(libDir);
-http = require("http");
+var http = require("../lib/http");
+
 var concurrency = 30;
 var port = 8000;
 var n = 700;
@@ -16,7 +14,7 @@ for (var i = 0; i < bytes; i++) {
 }
 
 var server = http.createServer(function (req, res) {
-  res.writeHeader(200, {
+  res.writeHead(200, {
     "Content-Type": "text/plain",
     "Content-Length": body.length
   });

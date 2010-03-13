@@ -333,11 +333,6 @@ const char* ToCString(const v8::String::Utf8Value& value) {
 
 static void ReportException(TryCatch &try_catch, bool show_line = false) {
   Handle<Message> message = try_catch.Message();
-  if (message.IsEmpty()) {
-    fprintf(stderr, "Error: (no message)\n");
-    fflush(stderr);
-    return;
-  }
 
   Handle<Value> error = try_catch.Exception();
   Handle<String> stack;
@@ -348,7 +343,7 @@ static void ReportException(TryCatch &try_catch, bool show_line = false) {
     if (raw_stack->IsString()) stack = Handle<String>::Cast(raw_stack);
   }
 
-  if (show_line) {
+  if (show_line && !message.IsEmpty()) {
     // Print (filename):(line number): (message).
     String::Utf8Value filename(message->GetScriptResourceName());
     const char* filename_string = ToCString(filename);
@@ -423,6 +418,7 @@ static Handle<Value> Loop(const Arguments& args) {
 }
 
 static Handle<Value> Unloop(const Arguments& args) {
+  fprintf(stderr, "Deprecation: Don't use process.unloop(). It will be removed soon.\n");
   HandleScope scope;
   int how = EVUNLOOP_ONE;
   if (args[0]->IsString()) {
@@ -468,14 +464,18 @@ static Handle<Value> Cwd(const Arguments& args) {
 
 static Handle<Value> Umask(const Arguments& args){
   HandleScope scope;
-
-  if(args.Length() < 1 || !args[0]->IsInt32()) {
+  unsigned int old;
+  if(args.Length() < 1) {
+    old = umask(0);
+    umask((mode_t)old);
+  }
+  else if(!args[0]->IsInt32()) {
     return ThrowException(Exception::TypeError(
           String::New("argument must be an integer.")));
   }
-  unsigned int mask = args[0]->Uint32Value();
-  unsigned int old = umask((mode_t)mask);
-
+  else {
+    old = umask((mode_t)args[0]->Uint32Value());
+  }
   return scope.Close(Uint32::New(old));
 }
 
@@ -504,7 +504,7 @@ static Handle<Value> SetGid(const Arguments& args) {
   Local<Integer> given_gid = args[0]->ToInteger();
   int gid = given_gid->Int32Value();
   int result;
-  if ((result == setgid(gid)) != 0) {
+  if ((result = setgid(gid)) != 0) {
     return ThrowException(Exception::Error(String::New(strerror(errno))));
   }
   return Undefined();
@@ -595,6 +595,7 @@ int getmem(size_t *rss, size_t *vsize) {
   struct kinfo_proc *kinfo = NULL;
   pid_t pid;
   int nprocs;
+  size_t page_size = getpagesize();
 
   pid = getpid();
 
@@ -604,7 +605,7 @@ int getmem(size_t *rss, size_t *vsize) {
   kinfo = kvm_getprocs(kd, KERN_PROC_PID, pid, &nprocs);
   if (kinfo == NULL) goto error;
 
-  *rss = kinfo->ki_rssize * PAGE_SIZE;
+  *rss = kinfo->ki_rssize * page_size;
   *vsize = kinfo->ki_size;
 
   kvm_close(kd);
@@ -843,6 +844,53 @@ Handle<Value> DLOpen(const v8::Arguments& args) {
   return Undefined();
 }
 
+// evalcx(code, sandbox={})
+// Executes code in a new context
+Handle<Value> EvalCX(const Arguments& args) {
+  HandleScope scope;
+
+  Local<String> code = args[0]->ToString();
+  Local<Object> sandbox = args.Length() > 1 ? args[1]->ToObject()
+                                            : Object::New();
+  // Create the new context
+  Persistent<Context> context = Context::New();
+
+  // Copy objects from global context, to our brand new context
+  Handle<Array> keys = sandbox->GetPropertyNames();
+
+  int i;
+  for (i = 0; i < keys->Length(); i++) {
+    Handle<String> key = keys->Get(Integer::New(i))->ToString();
+    Handle<Value> value = sandbox->Get(key);
+    context->Global()->Set(key, value->ToObject()->Clone());
+  }
+
+  // Enter and compile script
+  context->Enter();
+
+  // Catch errors
+  TryCatch try_catch;
+
+  Local<Script> script = Script::Compile(code, String::New("evalcx"));
+  Handle<Value> result;
+
+  if (script.IsEmpty()) {
+    result = ThrowException(try_catch.Exception());
+  } else {
+    result = script->Run();
+    if (result.IsEmpty()) {
+      result = ThrowException(try_catch.Exception());
+    }
+  }
+
+  // Clean up, clean up, everybody everywhere!
+  context->DetachGlobal();
+  context->Exit();
+  context.Dispose();
+
+  return scope.Close(result);
+}
+
 Handle<Value> Compile(const Arguments& args) {
   HandleScope scope;
 
@@ -1048,6 +1096,7 @@ static void Load(int argc, char *argv[]) {
   // define various internal methods
   NODE_SET_METHOD(process, "loop", Loop);
   NODE_SET_METHOD(process, "unloop", Unloop);
+  NODE_SET_METHOD(process, "evalcx", EvalCX);
   NODE_SET_METHOD(process, "compile", Compile);
   NODE_SET_METHOD(process, "_byteLength", ByteLength);
   NODE_SET_METHOD(process, "reallyExit", Exit);
@@ -1178,12 +1227,21 @@ static void ParseDebugOpt(const char* arg) {
 
 static void PrintHelp() {
   printf("Usage: node [options] script.js [arguments] \n"
+         "Options:\n"
          "  -v, --version      print node's version\n"
          "  --debug[=port]     enable remote debugging via given TCP port\n"
-         "  --debug-brk[=port] as above, but break in node.js and\n"
+         "                     without stopping the execution\n"
+         "  --debug-brk[=port] as above, but break in script.js and\n"
          "                     wait for remote debugger to connect\n"
-         "  --cflags           print pre-processor and compiler flags\n"
-         "  --v8-options       print v8 command line options\n\n"
+         "  --v8-options       print v8 command line options\n"
+         "  --vars             print various compiled-in variables\n"
+         "\n"
+         "Enviromental variables:\n"
+         "NODE_PATH            ':'-separated list of directories\n"
+         "                     prefixed to the module search path,\n"
+         "                     require.paths.\n"
+         "NODE_DEBUG           Print additional debugging output.\n"
+         "\n"
          "Documentation can be found at http://nodejs.org/api.html"
          " or with 'man node'\n");
 }
@@ -1195,19 +1253,21 @@ static void ParseArgs(int *argc, char **argv) {
     const char *arg = argv[i];
     if (strstr(arg, "--debug") == arg) {
       ParseDebugOpt(arg);
-      argv[i] = reinterpret_cast<const char*>("");
+      argv[i] = const_cast<char*>("");
       option_end_index = i;
     } else if (strcmp(arg, "--version") == 0 || strcmp(arg, "-v") == 0) {
       printf("%s\n", NODE_VERSION);
       exit(0);
-    } else if (strcmp(arg, "--cflags") == 0) {
-      printf("%s\n", NODE_CFLAGS);
+    } else if (strcmp(arg, "--vars") == 0) {
+      printf("NODE_PREFIX: %s\n", NODE_PREFIX);
+      printf("NODE_LIBRARIES_PREFIX: %s/%s\n", NODE_PREFIX, "lib/node/libraries");
+      printf("NODE_CFLAGS: %s\n", NODE_CFLAGS);
       exit(0);
     } else if (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0) {
       PrintHelp();
       exit(0);
     } else if (strcmp(arg, "--v8-options") == 0) {
-      argv[i] = reinterpret_cast<const char*>("--help");
+      argv[i] = const_cast<char*>("--help");
       option_end_index = i+1;
     } else if (argv[i][0] != '-') {
       option_end_index = i-1;
@@ -1237,7 +1297,13 @@ int main(int argc, char *argv[]) {
   evcom_ignore_sigpipe();
 
   // Initialize the default ev loop.
+#ifdef __sun
+  // TODO(Ryan) I'm experiencing abnormally high load using Solaris's
+  // EVBACKEND_PORT. Temporarally forcing select() until I debug.
+  ev_default_loop(EVBACKEND_SELECT);
+#else
   ev_default_loop(EVFLAG_AUTO);
+#endif
 
 
   ev_timer_init(&node::gc_timer, node::GCTimeout, GC_INTERVAL, GC_INTERVAL);
