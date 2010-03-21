@@ -112,23 +112,23 @@ exports.isWritable = function (path) {
 };
 
 exports.rename = function (source, target) {
-    throw Error("rename not yet implemented.");
+    return EMBEDDING.rename(source, target);
 };
 
 exports.move = function (source, target) {
-    throw Error("move not yet implemented.");
+    return EMBEDDING.rename(source, target);
 };
 
 exports.remove = function (path) {
-    throw Error("remove not yet implemented.");
+    return EMBEDDING.unlink(path);
 };
 
-exports.mkdir = function (path) {
-    throw Error("mkdir not yet implemented.");
+exports.mkdir = function (path, mode) {
+    return EMBEDDING.mkdir(path, mode || 0777);
 };
 
 exports.rmdir = function(path) {
-    throw Error("rmdir not yet implemented.");
+    return EMBEDDING.rmdir(path);
 };
 
 exports.touch = function (path, mtime) {
