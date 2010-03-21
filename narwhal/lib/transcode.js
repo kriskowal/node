@@ -150,7 +150,6 @@ exports.EncoderWriter = function (raw, charset, length) {
         var at = 0;
         while (at < bytes.length) {
             var length = Math.min(source.length - stop, bytes.length - at);
-            print(at, bytes.length, length);
             bytes.range(at, at + length).copy(source.range(stop, stop + length));
             stop += length;
             at += length;
