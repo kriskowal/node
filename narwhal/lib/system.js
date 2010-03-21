@@ -19,8 +19,6 @@ exports.stderr = new IO.TextOutputStream(new IO.IO(null, rawStderr));
 
 exports.originalArgs = exports.args.slice();
 
-exports.env = {};
-
 exports.fs = FS;
 
 // default logger
