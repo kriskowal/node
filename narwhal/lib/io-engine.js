@@ -85,8 +85,13 @@ exports.ByteStream = function (fd) {
             return NODE_FS.readInto(fd, buffer._bytes || buffer, start, stop, 0);
         },
         "write": function (binary, start, stop) {
+            binary = binary._bytes || binary;
+            if (start === undefined)
+                start = 0;
+            if (stop === undefined)
+                stop = binary.length;
             while (start < stop) {
-                start += NODE_FS.writeFrom(fd, binary._bytes || buffer, start, stop, 0);
+                start += NODE_FS.writeFrom(fd, binary, start, stop, 0);
             }
         },
         "flush": function () {
@@ -99,7 +104,7 @@ exports.ByteStream = function (fd) {
 };
 
 exports.TextInputStream = function (raw, lineBuffering, buffering, charset, options) {
-    return new TRANSCODE.EncoderReader(raw, charset || "UTF-8");
+    return new TRANSCODE.DecoderReader(raw, charset || "UTF-8");
 }
 
 exports.TextOutputStream = function (raw, lineBuffering, buffering, charset, options) {
@@ -147,9 +152,9 @@ exports.TextIOWrapper = function (raw, mode, lineBuffering, buffering, charset, 
     if (mode.update) {
         throw new Error("update IO NYI");
     } else if (mode.write || mode.append) {
-        throw new Error("write/append IO NYI");
+        return TRANSCODE.EncoderWriter(raw, charset || "UTF-8");
     } else if (mode.read) {
-        return TRANSCODE.EncoderReader(raw, charset || "UTF-8");
+        return TRANSCODE.DecoderReader(raw, charset || "UTF-8");
     } else {
         throw new Error("file must be opened for read, write, or append mode.");
     }

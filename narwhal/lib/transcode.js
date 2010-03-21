@@ -3,8 +3,8 @@ var Buffer = require("node/buffer").Buffer;
 var Transcoder = require("node/encodings").Transcoder;
 
 // reads bytes, returns chars
-exports.EncoderReader = function (raw, charset, length) {
-    var self = Object.create(exports.EncoderReader.prototype);
+exports.DecoderReader = function (raw, charset, length) {
+    var self = Object.create(exports.DecoderReader.prototype);
     var transcoder = new Transcoder(charset, "UTF-8");
     var source = new Buffer(length || 1024);
     var target = new Buffer(length || 1024);
@@ -131,125 +131,49 @@ exports.EncoderReader = function (raw, charset, length) {
     return Object.create(self);
 };
 
-// accepts bytes, writes chars
-exports.EncoderWriter = function (stream, soruce, target) {
-    throw new Error("NYI");
+// accepts chars, writes bytes
+exports.EncoderWriter = function (raw, charset, length) {
+    var self = Object.create(exports.EncoderWriter.prototype);
+    var transcoder = new Transcoder("UTF-8", charset);
+    var source = new Buffer(length || 1024);
+    var target = new Buffer(length || 1024);
+    var stop = 0; // end of unused source bytes
+    var state = {}; // transcoder state of previous run
 
-    var self = Object.create(exports.EncoderReader.prototype);
-    var transcoder = new Transcoder(source, target);
-
-    self.write = function () {
-        throw new Error("NYI");
-    };
-
-    self.writeFrom = function () {
-        throw new Error("NYI");
-    };
-
-    self.flush = function () {
-        throw new Error("NYI");
-    };
-
-    return Object.create(self);
-};
-
-// reads bytes, returns strings
-exports.DecoderReader = function (stream, source, target) {
-    throw new Error("NYI");
-
-    var self = Object.create(exports.EncoderReader.prototype);
-    var transcoder = new Transcoder(source, target);
-
-    self.read = function () {
-        throw new Error("NYI");
-    };
-
-    self.readInto = function () {
-        throw new Error("NYI");
-    };
-
-    return Object.create(self);
-};
-
-// accepts bytes, writes strings
-exports.DecoderWriter = function (stream, source, target) {
-    throw new Error("NYI");
-
-    var self = Object.create(exports.EncoderReader.prototype);
-    var transcoder = new Transcoder(source, target);
-
-    self.write = function () {
-        throw new Error("NYI");
-    };
-
-    self.writeFrom = function () {
-        throw new Error("NYI");
-    };
-
-    self.print = function () {
-        throw new Error("NYI");
+    self.write = function (text) {
+        if (state.error) {
+            state = {};
+            stop = 0;
+            throw new Error(state.error);
+        }
+        var bytes = Buffer.fromString(text, "UTF-8");
+        var at = 0;
+        while (at < bytes.length) {
+            var length = Math.min(source.length - stop, bytes.length - at);
+            print(at, bytes.length, length);
+            bytes.range(at, at + length).copy(source.range(stop, stop + length));
+            stop += length;
+            at += length;
+            state = transcoder.transcode(
+                source,
+                target,
+                0, stop // source
+            );
+            raw.write(target.range(0, state.target));
+            // shift unused bytes to beginning of source
+            source.range(state.source, stop).copy(source);
+            stop = stop - state.source;
+        }
     };
 
     self.flush = function () {
-        throw new Error("NYI");
+        raw.flush();
+        return self;
     };
 
-    return Object.create(self);
-};
-
-exports.TranscoderReader = function (source, target) {
-    throw new Error("NYI");
-
-    var self = Object.create(exports.EncoderReader.prototype);
-    var transcoder = new Transcoder(source, target);
-
-    self.read = function () {
-        throw new Error("NYI");
-    };
-
-    self.readInto = function () {
-        throw new Error("NYI");
-    };
-
-    self.write = function () {
-        throw new Error("NYI");
-    };
-
-    self.writeFrom = function () {
-        throw new Error("NYI");
-    };
-
-    self.flush = function () {
-        throw new Error("NYI");
-    };
-
-    return Object.create(self);
-};
-
-exports.TranscoderWriter = function (source, target) {
-    throw new Error("NYI");
-
-    var self = Object.create(exports.EncoderReader.prototype);
-    var transcoder = new Transcoder(source, target);
-
-    self.read = function () {
-        throw new Error("NYI");
-    };
-
-    self.readInto = function () {
-        throw new Error("NYI");
-    };
-
-    self.write = function () {
-        throw new Error("NYI");
-    };
-
-    self.writeFrom = function () {
-        throw new Error("NYI");
-    };
-
-    self.flush = function () {
-        throw new Error("NYI");
+    self.close = function () {
+        raw.close();
+        return self;
     };
 
     return Object.create(self);
