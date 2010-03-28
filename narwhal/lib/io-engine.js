@@ -2,166 +2,87 @@
 // -- tlrobinson Tom Robinson
 // -- kriskowal Kris Kowal Copyright (C) 2009-2010 MIT License
 
+/**
+ * @module
+ * @extends narwhal/io-boot
+ */
+
 var BINARY = require("binary");
 var NODE_FS = require("node/process").fs;
 var TRANSCODE = require("transcode");
-var Buffer = require("node/buffer").Buffer;
+var Buffer = require("narwhal/buffer").Buffer;
+var BOOT = require("narwhal/io-boot");
+var UTIL = require("narwhal/util");
 
-var IO = exports.IO = function(inputStream, outputStream) {
-    this.inputStream = inputStream;
-    this.outputStream = outputStream;
-};
+UTIL.update(exports, BOOT);
 
-IO.prototype.readInto = function(buffer, length, from) {
+/**
+ * @returns a raw byte stream, supporting both reading and writing
+ * APIs.
+ * @param {Number} fd file descriptor
+ * @constructor
+ */
+var FdIO = exports.openFd = function (fd) {
+    var self = Object.create(FdIO.prototype);
 
-    var bytes = buffer._bytes; // Node Buffer
+    /*** */
+    self.fd = fd;
 
-    var offset = buffer._offset;
-    if (typeof from === "number")
-        offset += from;
+    /*** */
+    self.readMax = function (max) {
+        // read some
+        max = max || 1024;
+        var binary = new BINARY.ByteArray(max);
+        var buffer = binary._bytes;
+        var actual = NODE_FS.readInto(fd, buffer, 0, max, 0);
+        return binary.slice(0, actual).toByteString();
+    };
 
-    if (length > bytes.length + offset)
-        throw "FIXME: Buffer too small. Throw or truncate?";
+    /*** */
+    self.readInto = function (buffer, start, stop) {
+        return NODE_FS.readInto(fd, buffer, start, stop);
+    };
 
-    var total = 0,
-        bytesRead = 0;
-
-    while (total < length) {
-        bytesRead = this.inputStream.read(bytes, offset + total, length - total);
-        if (bytesRead < 0)
-            break;
-        total += bytesRead;
-    }
-
-    return total;
-};
-
-IO.prototype.writeInto = function(buffer, from, to) {
-    return this.outputStream.write(buffer, buffer._offset + from, to - from);
-};
-
-IO.prototype.copy = function (output, mode, options) {
-    while (true) {
-        var buffer = this.read(null);
-        if (!buffer.length)
-            break;
-        output.write(buffer);
-    }
-    output.flush();
-    return this;
-};
-
-IO.prototype.flush = function() {
-    this.outputStream.flush();
-    return this;
-};
-
-IO.prototype.close = function() {
-    if (this.inputStream)
-        this.inputStream.close();
-    if (this.outputStream)
-        this.outputStream.close();
-};
-
-IO.prototype.isatty = function () {
-    return false;
-};
-
-exports.ByteStream = function (fd) {
-    return {
-        "fd": fd,
-        "read": function (max) {
-            if (arguments.length == 0) {
-                throw new Error("Read all not supported directly by ByteStream");
-            } else {
-                // read some
-                max = max || 1024;
-                var binary = new BINARY.ByteArray(max);
-                var buffer = binary._bytes;
-                var actual = NODE_FS.readInto(fd, buffer, 0, max, 0);
-                return binary.slice(0, actual).toByteString();
-            }
-        },
-        "readInto": function (buffer, start, stop) {
-            return NODE_FS.readInto(fd, buffer._bytes || buffer, start, stop, 0);
-        },
-        "write": function (binary, start, stop) {
-            binary = binary._bytes || binary;
-            if (!(binary instanceof Buffer))
-                throw new Error("ByteStream::write(0) must be a Buffer");
-            if (start === undefined)
-                start = 0;
-            if (stop === undefined)
-                stop = binary.length;
-            while (start < stop) {
-                start += NODE_FS.writeFrom(fd, binary, start, stop, 0);
-            }
-        },
-        "flush": function () {
-            //NODE_FS.flush(fd);
-        },
-        "close": function () {
-            NODE_FS.close(fd);
+    /*** */
+    self.write = function (binary, start, stop) {
+        binary = binary._bytes || binary;
+        if (!(binary instanceof Buffer))
+            throw new Error("openFd::write(0) must be a Buffer");
+        if (start === undefined)
+            start = 0;
+        if (stop === undefined)
+            stop = binary.length;
+        while (start < stop) {
+            start += NODE_FS.writeFrom(fd, binary, start, stop, 0);
         }
     };
-};
 
-exports.TextInputStream = function (raw, lineBuffering, buffering, charset, options) {
-    return new TRANSCODE.DecoderReader(raw, charset || "UTF-8");
-}
-
-exports.TextOutputStream = function (raw, lineBuffering, buffering, charset, options) {
-
-    var self = this;
-
-    self.raw = raw;
-
-    self.write = function (string) {
-        raw.write(string.toByteString(charset));
-        return self;
+    /*** */
+    self.isTty = function () {
+        // TODO
+        //NODE_FS.isatty(fd);
+        return false;
     };
 
-    self.writeLine = function (line) {
-        raw.write(string.toByteString(charset) + "\n");
-        return self;
-    };
-
-    self.writeLines = function (lines) {
-        lines.forEach(self.writeLine);
-        return self;
-    };
-
-    self.print = function () {
-        self.write(Array.prototype.join.call(arguments, " ") + "\n");
-        self.flush();
-        // todo recordSeparator, fieldSeparator
-        return self;
-    };
-
+    /*** */
     self.flush = function () {
-        raw.flush();
-        return self;
+        // NODE_FS.fsync(fd);
     };
 
+    /*** */
     self.close = function () {
-        raw.close();
-        return self;
+        NODE_FS.close(fd);
     };
 
-    return Object.create(self);
+    return self;
 };
 
-exports.TextIOWrapper = function (raw, mode, lineBuffering, buffering, charset, options) {
-    if (mode.update) {
-        throw new Error("update IO NYI");
-    } else if (mode.write || mode.append) {
-        return TRANSCODE.EncoderWriter(raw, charset || "UTF-8");
-    } else if (mode.read) {
-        return TRANSCODE.DecoderReader(raw, charset || "UTF-8");
-    } else {
-        throw new Error("file must be opened for read, write, or append mode.");
-    }
-}; 
+/*** */
+FdIO.prototype.read = BOOT.Reader.prototype.read;
+
+/*** */
+FdIO.prototype.readAll = BOOT.Reader.prototype.readAll;
+
 
 
 /* ByteIO */
@@ -181,7 +102,7 @@ var ByteIO = exports.ByteIO = function(binary) {
     */
 };
 
-ByteIO.prototype = new exports.IO();
+ByteIO.prototype = Object.create(exports.IO.prototype);
 
 ByteIO.prototype.toByteString = function() {
     throw new Error("Not yet implemented");
