@@ -21,6 +21,7 @@ UTIL.update(exports, BOOT);
  * APIs.
  * @param {Number} fd file descriptor
  * @constructor
+ * @extends io-boot#Reader
  */
 var FdIO = exports.openFd = function (fd) {
     var self = Object.create(FdIO.prototype);
@@ -77,12 +78,8 @@ var FdIO = exports.openFd = function (fd) {
     return self;
 };
 
-/*** */
-FdIO.prototype.read = BOOT.Reader.prototype.read;
-
-/*** */
-FdIO.prototype.readAll = BOOT.Reader.prototype.readAll;
-
+FdIO.prototype = Object.create(BOOT.Reader.prototype);
+FdIO.prototype.constructor = FdIO;
 
 
 /* ByteIO */
