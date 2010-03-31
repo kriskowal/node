@@ -188,12 +188,12 @@ Object.defineProperty(exports.Permissions, "default", {
     "get": function () {
         // avoid infinite recursion by bypassing the constructor
         var permissions = Object.create(exports.Permissions.prototype);
-        permissions.update(~PROCESS.umask() & 0777);
+        permissions.update(~PROCESS.umask() & 0666);
         return permissions;
     },
     "set": function (permissions) {
         permissions = new exports.Permissions(permissions);
-        PROCESS.umask(~permissions.toUnix() & 0777);
+        PROCESS.umask(~permissions.toUnix() & 0666);
     }
 });
 
