@@ -89,7 +89,7 @@ static Handle<Value> System(const Arguments& args) {
   */
 }
 
-// path, args, env, PATH String or search
+// path, args, env, Boolean search
 static Handle<Value> Exec(const Arguments& args) {
   HandleScope scope;
   Local<Value> result;
@@ -126,13 +126,15 @@ static Handle<Value> Exec(const Arguments& args) {
     } else {
       code = execv(path, argv);
     }
-  } else if (args[3]->IsString()) {
-    Local<String> search_path_string = args[3]->ToString();
-    int search_path_string_length = search_path_string->Length();
-    char *search_path = new char[search_path_string_length + 1];
-    search_path[search_path_string_length] = 0;
-    code = execvP(path, search_path, argv);
-    delete search_path;
+// The following are redacted because they depend on the execvP
+// extension provided by BSD but not Posix, ergo Linux.
+//} else if (args[3]->IsString()) {
+//  Local<String> search_path_string = args[3]->ToString();
+//  int search_path_string_length = search_path_string->Length();
+//  char *search_path = new char[search_path_string_length + 1];
+//  search_path[search_path_string_length] = 0;
+//  code = execvP(path, search_path, argv);
+//  delete search_path;
   } else if (args[3]->IsUndefined()) {
     code = execv(path, argv);
   } else {
