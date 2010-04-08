@@ -48,7 +48,7 @@ exports.Request = function (_request) {
      * @returns a promise for a String containing the entirety of the HTTP
      * request body. */
     request.read = function () {
-        var deferred = Q.Deferred();
+        var deferred = Q.defer();
         var accumulate = []
         _request.addListener("data", function (chunk) {
             accumulate.push(chunk);
