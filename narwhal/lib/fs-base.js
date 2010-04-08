@@ -529,11 +529,11 @@ exports.canonical = function (path) {
             outs = [ins.shift()];
         while (ins.length) {
             var leaf = ins.shift();
-            var consider = BOOT.join.apply(undefined, outs.concat([leaf]));
+            var consider = outs.concat([leaf]).join(BOOT.SEPARATOR);
 
             // cycle breaker; does not throw an error since every invalid path
             // must also have an intrinsic canonical name.
-            if (consider == prev) {
+            if (consider === prev) {
                 ins.unshift.apply(ins, BOOT.split(link));
                 break;
             }
@@ -551,7 +551,7 @@ exports.canonical = function (path) {
             }
         }
     }
-    var path = BOOT.join.apply(undefined, outs);
+    var path = outs.join(BOOT.SEPARATOR);
     if (exports.isDirectory(path))
         path += "/";
     return path;
