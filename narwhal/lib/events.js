@@ -1,6 +1,6 @@
 
-require("./loader"); // forces node/process reload
-var process = require("node/process");
+require("node/loader"); // forces node/process reload
+var process = require("process");
 
 exports.EventEmitter = process.EventEmitter;
 

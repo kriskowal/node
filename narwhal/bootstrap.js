@@ -32,7 +32,7 @@
             if (exports.stdout) {
                 return exports.stdout.print.apply(exports.stdout, arguments);
             } else {
-                modules['node/process'].write(
+                modules['process'].write(
                     Array.prototype.join.call(arguments, " ") + "\n"
                 );
             }
@@ -85,8 +85,8 @@
 
     // module "narwhal/fs"
     (function (exports) {
-        var K = modules['node/process'];
-        var NODE_FS = modules['node/process'].fs;
+        var K = modules['process'];
+        var NODE_FS = modules['process'].fs;
 
         exports.isFile = function (path) {
             try {
@@ -121,7 +121,7 @@
 
     })(modules['narwhal/fs'] = {});
 
-    var PROCESS = modules['node/process'];
+    var PROCESS = modules['process'];
     var FS = modules['narwhal/fs'];
     var SYSTEM = modules['system'];
     var ENGINE = modules['engine'];

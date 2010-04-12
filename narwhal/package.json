@@ -1,0 +1,5 @@
+{
+    "name": "node-narwhal",
+    "description": "A NodeJS package that provides a compatibility layer for running Narwhal on Node",
+    "version": "0.0.0"
+}

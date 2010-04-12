@@ -1,8 +1,8 @@
 
-var EMBEDDING = require("os-embedding");
 var SYSTEM = require("system");
-var IO = require("io");
-var UTIL = require("narwhal/util");
+var EMBEDDING = require("./os-embedding");
+var IO = require("./io");
+var UTIL = require("./util");
 UTIL.update(exports, EMBEDDING);
 
 /**

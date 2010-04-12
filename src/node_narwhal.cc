@@ -1195,18 +1195,17 @@ static void Load(int argc, char *argv[]) {
 
   Handle<Object> module_node_encodings = Object::New();
   Transcoder::Initialize(module_node_encodings);
-  modules->Set(String::NewSymbol("node/encodings"), module_node_encodings);
   modules->Set(String::NewSymbol("narwhal/encodings-engine"), module_node_encodings);
 
   Handle<Object> module_os = Object::New();
   Os::Initialize(module_os);
-  modules->Set(String::NewSymbol("os-embedding"), module_os);
+  modules->Set(String::NewSymbol("narwhal/os-embedding"), module_os);
 
-  modules->Set(String::NewSymbol("node/dns-embedding"), dns);
-  modules->Set(String::NewSymbol("node/fs-embeddding"), fs);
-  modules->Set(String::NewSymbol("node/tcp-embedding"), tcp);
-  modules->Set(String::NewSymbol("node/http-embedding"), http);
-  modules->Set(String::NewSymbol("node/process"), process);
+  modules->Set(String::NewSymbol("dns-embedding"), dns);
+  modules->Set(String::NewSymbol("fs-embeddding"), fs);
+  modules->Set(String::NewSymbol("tcp-embedding"), tcp);
+  modules->Set(String::NewSymbol("http-embedding"), http);
+  modules->Set(String::NewSymbol("process"), process);
 
 #ifndef NDEBUG
   TryCatch try_catch;

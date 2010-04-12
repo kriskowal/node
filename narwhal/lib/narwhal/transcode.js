@@ -1,6 +1,6 @@
 
-var Buffer = require("narwhal/buffer").Buffer;
-var Transcoder = require("node/encodings").Transcoder;
+var Buffer = require("./buffer").Buffer;
+var Transcoder = require("./encodings").Transcoder;
 
 // reads bytes, returns chars
 exports.DecoderReader = function (raw, charset, length) {

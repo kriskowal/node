@@ -2,7 +2,7 @@
 // Map/Reduce with Promises on Narwhal+Node
 
 var SYSTEM = require("system");
-var EL = require("event-loop");
+var EL = require("narwhal/event-loop");
 var Q = require("narwhal/promise");
 var UTIL = require("narwhal/util");
 

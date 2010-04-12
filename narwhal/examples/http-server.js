@@ -1,6 +1,6 @@
 
 var SYSTEM = require("system");
-var HTTP = require("q-http-server");
+var HTTP = require("narwhal/q-http-server");
 var port = 8000;
 
 HTTP.Server(function (request) {

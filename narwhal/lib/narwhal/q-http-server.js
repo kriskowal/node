@@ -7,7 +7,7 @@
 /*whatsupdoc*/
 
 var HTTP = require("http");
-var Q = require("narwhal/promise");
+var Q = require("narwhal/promise-util");
 
 /**
  * @param {respond(request Request)} respond a JSGI responder function that
@@ -25,14 +25,22 @@ exports.Server = function (respond) {
         Q.when(respond(request), function (response) {
             _response.writeHead(response.status, response.headers);
             return Q.when(response.body, function (body) {
-                if (body)
-                    return Q.when(body.forEach(function (chunk) {
+                if (
+                    Array.isArray(body) &&
+                    body.length === 1 &&
+                    typeof body[0] === "string"
+                ) {
+                    _response.end(body[0]);
+                } else if (body) {
+                    var complete = Q.forEach(response.body, function (chunk) {
                         _response.write(chunk);
-                    }), function () {
-                        _response.close();
                     });
-                else
-                    _response.close();
+                    return Q.when(complete, function () {
+                        _response.end();
+                    });
+                } else {
+                    _response.end();
+                }
             });
         });
     });
@@ -48,7 +56,7 @@ exports.Request = function (_request) {
      * @returns a promise for a String containing the entirety of the HTTP
      * request body. */
     request.read = function () {
-        var deferred = Q.defer();
+        var deferred = Q.Deferred();
         var accumulate = []
         _request.addListener("data", function (chunk) {
             accumulate.push(chunk);

@@ -35,7 +35,7 @@ JavaScript based on the methods specified here.''
 // CommonJS
 var SYSTEM = require("system");
 // Node
-var PROCESS = require("process");
+var PROCESS = require("process")
 var EMBEDDING = PROCESS.fs;
 // Narwhal
 var IO = require("narwhal/io");
@@ -190,12 +190,12 @@ Object.defineProperty(exports.Permissions, "default", {
     "get": function () {
         // avoid infinite recursion by bypassing the constructor
         var permissions = Object.create(exports.Permissions.prototype);
-        permissions.update(~PROCESS.umask() & 0777);
+        permissions.update(~PROCESS.umask() & 0666);
         return permissions;
     },
     "set": function (permissions) {
         permissions = new exports.Permissions(permissions);
-        PROCESS.umask(~permissions.toUnix() & 0777);
+        PROCESS.umask(~permissions.toUnix() & 0666);
     }
 });
 
@@ -531,11 +531,11 @@ exports.canonical = function (path) {
             outs = [ins.shift()];
         while (ins.length) {
             var leaf = ins.shift();
-            var consider = BOOT.join.apply(undefined, outs.concat([leaf]));
+            var consider = outs.concat([leaf]).join(BOOT.SEPARATOR);
 
             // cycle breaker; does not throw an error since every invalid path
             // must also have an intrinsic canonical name.
-            if (consider == prev) {
+            if (consider === prev) {
                 ins.unshift.apply(ins, BOOT.split(link));
                 break;
             }
@@ -553,7 +553,7 @@ exports.canonical = function (path) {
             }
         }
     }
-    var path = BOOT.join.apply(undefined, outs);
+    var path = outs.join(BOOT.SEPARATOR);
     if (exports.isDirectory(path))
         path += "/";
     return path;

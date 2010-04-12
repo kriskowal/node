@@ -7,12 +7,12 @@
  * @extends narwhal/io-boot
  */
 
-var BINARY = require("binary");
-var NODE_FS = require("node/process").fs;
-var TRANSCODE = require("transcode");
-var Buffer = require("narwhal/buffer").Buffer;
-var BOOT = require("narwhal/io-boot");
-var UTIL = require("narwhal/util");
+var NODE_FS = require("process").fs;
+var BINARY = require("./binary");
+var TRANSCODE = require("./transcode");
+var Buffer = require("./buffer").Buffer;
+var BOOT = require("./io-boot");
+var UTIL = require("./util");
 
 UTIL.update(exports, BOOT);
 
@@ -21,7 +21,6 @@ UTIL.update(exports, BOOT);
  * APIs.
  * @param {Number} fd file descriptor
  * @constructor
- * @extends io-boot#Reader
  */
 var FdIO = exports.openFd = function (fd) {
     var self = Object.create(FdIO.prototype);
@@ -78,40 +77,9 @@ var FdIO = exports.openFd = function (fd) {
     return self;
 };
 
-FdIO.prototype = Object.create(BOOT.Reader.prototype);
-FdIO.prototype.constructor = FdIO;
+/*** */
+FdIO.prototype.read = BOOT.Reader.prototype.read;
 
-
-/* ByteIO */
-
-// FIXME: this doesn't read/write the same stream
-
-var ByteIO = exports.ByteIO = function(binary) {
-    throw new Error("Not yet implemented");
-
-    /* rhino impl
-    this.inputStream = binary ? new java.io.ByteArrayInputStream(binary._bytes, binary._offset, binary._length) : null;
-    this.outputStream = new java.io.ByteArrayOutputStream();
-    
-    var stream = (this.inStream, this.outStream);
-    
-    this.length = binary ? binary.length : 0;
-    */
-};
-
-ByteIO.prototype = Object.create(exports.IO.prototype);
-
-ByteIO.prototype.toByteString = function() {
-    throw new Error("Not yet implemented");
-
-    /* rhino impl
-    var bytes = this.outputStream.toByteArray();
-    var ByteString = require("binary").ByteString;
-    return new ByteString(bytes, 0, bytes.length);
-    */
-};
-
-ByteIO.prototype.decodeToString = function(charset) {
-    return String(charset ? this.outputStream.toString(charset) : this.outputStream.toString());
-};
+/*** */
+FdIO.prototype.readAll = BOOT.Reader.prototype.readAll;
 

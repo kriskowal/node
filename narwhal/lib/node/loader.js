@@ -1,10 +1,13 @@
 
-var FS = require("file");
+// CommonJS
 var SYSTEM = require("system");
+// Narwhal
+var FS = require("narwhal/fs");
 var ENGINE = require("engine");
-var PROCESS = require.force("node/process");
-var EVENTS = require("node/events");
-var PATH = require("node/path");
+// Node
+var PROCESS = require.force("process");
+var EVENTS = require("events");
+var PATH = require("path");
 
 var loader = require.loader;
 var root = FS.path(module.path).resolve("../../../");
