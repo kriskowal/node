@@ -24,6 +24,6 @@ exports.originalArgs = exports.args.slice();
 exports.fs = FS;
 
 // default logger
-var Logger = require("./logger").Logger;
+var Logger = require("./narwhal/logger").Logger;
 exports.log = new Logger(exports.stderr);
 

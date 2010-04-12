@@ -1,5 +1,5 @@
 
-var PROCESS = require("node/process");
+var PROCESS = require("process");
 
 function observe(callback) {
     var timer = this;
